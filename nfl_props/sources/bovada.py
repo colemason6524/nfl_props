@@ -24,6 +24,7 @@ from ..utils import log
 
 BOVADA_BASE = "https://www.bovada.lv/services/sports/event/coupon/events/A/description"
 BOVADA_NFL_URL = f"{BOVADA_BASE}/football/nfl?marketFilterId=def&preMatchOnly=true"
+BOVADA_EVENT_DELAY_SECONDS = 1.0
 
 # Team-total naming varies ("Total Points Scored by X", "Team Total - X",
 # "X Total Points"); they are usually posted only during game week.
@@ -184,7 +185,8 @@ def _fetch_json(url: str, cache_name: str, refresh: bool = True) -> FetchResult:
             last_err = exc
             if isinstance(exc, HTTPError) and exc.code != 429 and exc.code < 500:
                 break  # client error (except 429) won't improve on retry
-            time.sleep(1.0 * attempt)
+            if attempt == 0:
+                time.sleep(1.0)
 
     cached = _load_cache(cache_path)
     if cached is not None:
@@ -385,6 +387,8 @@ def fetch_live_games(refresh: bool = True,
         for game in games:
             if not game.link:
                 continue
+            if refresh and event_fetch["requested"]:
+                time.sleep(BOVADA_EVENT_DELAY_SECONDS)
             event_fetch["requested"] += 1
             try:
                 event = fetch_event_payload(game.link, refresh=refresh)
@@ -404,6 +408,7 @@ def fetch_live_games(refresh: bool = True,
         "team_totals_found": tt_found,
         "coupon_fetch": coupon.as_dict(),
         "event_fetches": event_fetch,
+        "event_request_delay_seconds": BOVADA_EVENT_DELAY_SECONDS if refresh else 0.0,
         "stale_games_filtered": len(stale),
         "stale_games": stale,
         "missing_kickoffs_filtered": len(missing_kickoff),

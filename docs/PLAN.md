@@ -125,6 +125,9 @@ threshold change; `MODEL_VERSION`/`TIER_POLICY_VERSION` unchanged,
   global `SEND_DISCORD=true`. NFL now uses sport-specific
   `NFL_SEND_DISCORD`, preventing cross-project flags from breaking or sending
   the NFL board. The Tuesday wrapper also rebuilds both v1 and v2 state.
+- Windows also exposed Bovada 429s when fetching 16 event payloads in a burst.
+  Event requests are now spaced one second apart and transient retry backoff
+  occurs before the retry, preserving game-week team-total coverage.
 
 ### 2026-08-13 — initial build + first backtest
 
