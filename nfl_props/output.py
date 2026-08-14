@@ -20,7 +20,8 @@ def _fmt_line(c: Candidate) -> str:
     return "-"
 
 
-def render_board(candidates: List[Candidate], summary: dict) -> str:
+def render_board(candidates: List[Candidate], summary: dict,
+                 watch_limit: Optional[int] = 30) -> str:
     lines = []
     lines.append(f"NFL board — {summary['games_screened']} games | "
                  f"state as of {summary.get('state_as_of')} | "
@@ -39,22 +40,33 @@ def render_board(candidates: List[Candidate], summary: dict) -> str:
         rows = [c for c in candidates if c.tier == tier]
         if not rows:
             continue
-        lines.append(f"\n{tier} ({len(rows)}):")
+        shown, hidden = rows, 0
+        if tier == "Watch" and watch_limit is not None and len(rows) > watch_limit:
+            hidden = len(rows) - watch_limit
+            shown = rows[:watch_limit]
+        heading = f"\n{tier} ({len(rows)})"
+        if hidden:
+            heading += f", showing {watch_limit}"
+        lines.append(heading + ":")
         lines.append(f"{'matchup':<14} {'market':<10} {'side':<10} {'line':>6} "
                      f"{'odds':>6} {'p_mod':>6} {'p_mkt':>6} {'edge':>6} "
                      f"{'EV':>7} {'flags'}")
-        for c in rows:
+        for c in shown:
             lines.append(
                 f"{c.away + ' @ ' + c.home:<14} {c.market:<10} {c.side:<10} "
                 f"{_fmt_line(c):>6} {c.american:>+6d} {c.p_model:>6.3f} "
                 f"{c.p_market:>6.3f} {c.edge:>+6.3f} {c.ev:>+7.2%} "
                 f"{','.join(c.flags)}")
+        if hidden:
+            lines.append(f"({hidden} additional {tier} rows retained in "
+                         f"history JSON)")
     return "\n".join(lines)
 
 
 def export_history(candidates: List[Candidate], summary: dict,
                    games_raw: List[dict],
-                   diagnostics: Optional[dict] = None) -> Path:
+                   diagnostics: Optional[dict] = None,
+                   v2_shadow: Optional[list] = None) -> Path:
     HISTORY_DIR.mkdir(parents=True, exist_ok=True)
     stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
     payload = {
@@ -66,6 +78,7 @@ def export_history(candidates: List[Candidate], summary: dict,
         "candidates": [asdict(c) for c in candidates],
         "bovada_games": games_raw,
         "source_diagnostics": diagnostics or {},
+        "v2_shadow": v2_shadow,
     }
     path = HISTORY_DIR / f"nfl_board_{stamp}.json"
     path.write_text(json.dumps(payload, indent=1))

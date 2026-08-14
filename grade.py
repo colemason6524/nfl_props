@@ -59,6 +59,37 @@ def load_plays(history_dir: Path, since: str, include_watch: bool) -> list[dict]
     return list(latest.values())
 
 
+def load_shadow_projections(history_dir: Path, since: str) -> list[dict]:
+    """Latest pre-kickoff v1/v2 score projection for each game."""
+    latest: dict[tuple, dict] = {}
+    for path in sorted(history_dir.glob("nfl_board_*.json")):
+        try:
+            payload = json.loads(path.read_text())
+        except (json.JSONDecodeError, OSError) as exc:
+            log(f"[grade] skipping unreadable {path.name}: {exc}")
+            continue
+        generated = _parse_ts(payload["generated_at_utc"])
+        if since and generated.date().isoformat() < since:
+            continue
+        for projection in payload.get("summary", {}).get("projections", []):
+            required = ("mu_home", "mu_away", "mu_home_v2", "mu_away_v2",
+                        "start_time_utc", "away", "home")
+            if any(projection.get(k) is None for k in required):
+                continue
+            kickoff = _parse_ts(projection["start_time_utc"])
+            if generated > kickoff:
+                continue
+            key = (projection["away"], projection["home"],
+                   kickoff.date().isoformat())
+            prev = latest.get(key)
+            if prev is None or generated > prev["_generated"]:
+                row = dict(projection)
+                row["_generated"] = generated
+                row["_kickoff"] = kickoff
+                latest[key] = row
+    return list(latest.values())
+
+
 def match_game(games: pd.DataFrame, away: str, home: str,
                kickoff: datetime) -> pd.Series | None:
     for delta in (0, -1, 1):
@@ -106,6 +137,51 @@ def grade_play(play: dict, game: pd.Series) -> str | None:
         hit = pts > float(line) if direction == "OVER" else pts < float(line)
         return "win" if hit else "loss"
     return None
+
+
+def grade_shadow_projection(projection: dict, game: pd.Series) -> dict | None:
+    home_pts, away_pts = game["home_score"], game["away_score"]
+    if pd.isna(home_pts) or pd.isna(away_pts):
+        return None
+    home_pts, away_pts = float(home_pts), float(away_pts)
+    actual_margin = home_pts - away_pts
+    actual_total = home_pts + away_pts
+    mu_h1, mu_a1 = float(projection["mu_home"]), float(projection["mu_away"])
+    mu_h2 = float(projection["mu_home_v2"])
+    mu_a2 = float(projection["mu_away_v2"])
+    return {
+        "away": projection["away"],
+        "home": projection["home"],
+        "kickoff_utc": projection["start_time_utc"],
+        "mu_home_v1": mu_h1,
+        "mu_away_v1": mu_a1,
+        "mu_home_v2": mu_h2,
+        "mu_away_v2": mu_a2,
+        "points_mae_v1": (abs(home_pts - mu_h1) + abs(away_pts - mu_a1)) / 2.0,
+        "points_mae_v2": (abs(home_pts - mu_h2) + abs(away_pts - mu_a2)) / 2.0,
+        "margin_mae_v1": abs(actual_margin - (mu_h1 - mu_a1)),
+        "margin_mae_v2": abs(actual_margin - (mu_h2 - mu_a2)),
+        "total_mae_v1": abs(actual_total - (mu_h1 + mu_a1)),
+        "total_mae_v2": abs(actual_total - (mu_h2 + mu_a2)),
+        "final": f"{projection['away']} {int(away_pts)} @ "
+                 f"{projection['home']} {int(home_pts)}",
+    }
+
+
+def summarize_shadow(rows: list[dict]) -> list[str]:
+    def mean(key: str) -> float:
+        return sum(float(r[key]) for r in rows) / len(rows)
+
+    p1, p2 = mean("points_mae_v1"), mean("points_mae_v2")
+    m1, m2 = mean("margin_mae_v1"), mean("margin_mae_v2")
+    t1, t2 = mean("total_mae_v1"), mean("total_mae_v2")
+    return [
+        f"  {'model':<8} {'points MAE':>10} {'margin MAE':>11} {'total MAE':>10}",
+        f"  {'v1':<8} {p1:>10.3f} {m1:>11.3f} {t1:>10.3f}",
+        f"  {'v2':<8} {p2:>10.3f} {m2:>11.3f} {t2:>10.3f}",
+        f"  {'v2-v1':<8} {p2 - p1:>+10.3f} {m2 - m1:>+11.3f} "
+        f"{t2 - t1:>+10.3f}",
+    ]
 
 
 def summarize(rows: list[dict], group_key) -> list[str]:
@@ -161,6 +237,23 @@ def main() -> int:
                        f"{play['home']} {int(game['home_score'])}"
         graded.append(row)
 
+    shadow = load_shadow_projections(args.history_dir, args.since)
+    shadow_graded, shadow_pending, shadow_unmatched, shadow_excluded = [], [], [], []
+    for projection in shadow:
+        game = match_game(games, projection["away"], projection["home"],
+                          projection["_kickoff"])
+        if game is None:
+            shadow_unmatched.append(projection)
+            continue
+        if str(game.get("game_type", "REG")) != "REG":
+            shadow_excluded.append(projection)
+            continue
+        row = grade_shadow_projection(projection, game)
+        if row is None:
+            shadow_pending.append(projection)
+        else:
+            shadow_graded.append(row)
+
     lines = [
         "nfl_props grade report",
         f"generated: {datetime.now(timezone.utc).isoformat()}",
@@ -184,15 +277,25 @@ def main() -> int:
     if unmatched:
         lines.append(f"\nunmatched games (check team map / dates): "
                      f"{[(p['away'], p['home']) for p in unmatched[:10]]}")
+    lines.append(
+        f"\nv2 shadow projections: graded {len(shadow_graded)} | "
+        f"pending {len(shadow_pending)} | unmatched {len(shadow_unmatched)} | "
+        f"excluded non-REG {len(shadow_excluded)}")
+    if shadow_graded:
+        lines += summarize_shadow(shadow_graded)
 
     report = "\n".join(lines)
     print(report)
-    if not args.no_export and graded:
+    if not args.no_export and (graded or shadow_graded):
         stamp = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
         path = BACKTESTS_DIR / f"grade_{stamp}.txt"
         path.write_text(report)
-        (BACKTESTS_DIR / f"grade_{stamp}_rows.json").write_text(
-            json.dumps(graded, indent=1, default=str))
+        if graded:
+            (BACKTESTS_DIR / f"grade_{stamp}_rows.json").write_text(
+                json.dumps(graded, indent=1, default=str))
+        if shadow_graded:
+            (BACKTESTS_DIR / f"grade_{stamp}_v2_rows.json").write_text(
+                json.dumps(shadow_graded, indent=1, default=str))
         log(f"[grade] report -> {path}")
     return 0
 

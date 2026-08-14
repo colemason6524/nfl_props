@@ -106,6 +106,12 @@ Expect on stderr/console:
 - `[board] history -> outputs\history\nfl_board_*.json`
 - `tt=0` before game week is coverage, not failure (team totals post late)
 
+An extra `[board] filtered N stale / M missing-kickoff games` line is normal
+when a cached board contains already-started games — they are dropped, not
+offered. `outputs\diagnostics\bovada_coverage_*.json` carries the full fetch
+metadata + team-total parse diagnostics for game-week verification. Run the
+unit tests once after clone: `.venv\Scripts\python -m unittest discover -s tests`.
+
 Then confirm the export exists:
 
 ```bat
@@ -118,10 +124,13 @@ dir outputs\history\nfl_board_*.json
 .venv\Scripts\python grade.py
 ```
 
-Expect before any games finish: `graded 0 | pending K | unmatched 0`.
+Expect before any games finish: `graded 0 | pending K | unmatched 0`, plus a
+`v2 shadow projections: graded 0 | pending N | unmatched 0` line when the v2
+state/history exists.
 `unmatched > 0` is a real problem (team alias or date matching) — stop and
 investigate before scheduling. After a completed week, expect graded rows,
-a by-tier/by-market summary, and a report in `outputs\backtests\`.
+a by-tier/by-market summary, v1/v2 points/margin/total MAE, and a report in
+`outputs\backtests\`.
 
 ### 4.6 Task wrappers exactly as Task Scheduler will run them
 

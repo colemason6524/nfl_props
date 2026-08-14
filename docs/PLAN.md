@@ -57,6 +57,71 @@ are absolute gates; presentation and history never change thresholds.
 
 ## Findings log
 
+### 2026-08-14 — v2 shadow candidate (data foundation + ablation: flat)
+
+Built a parallel v2 candidate model, research-only, without touching v1
+probabilities or tiers (`MODEL_VERSION`/`TIER_POLICY_VERSION` unchanged;
+`HISTORY_SCHEMA_VERSION` 2→3 for the `v2_shadow` export block).
+
+- **Data foundation** (`sources/nflverse.py`): canonical store now also writes
+  `team_situational_games.parquet` (pass/rush EPA + success/sack/explosive/
+  early-down splits per team-game, 7,124 rows) and `qb_games.parquet`
+  (passer-game EPA/dropback, CPOE, sacks, scrambles; 13,813 rows, 463 QBs,
+  `is_primary` per team-game). `games.parquet` now retains rest, location,
+  stadium, roof, surface, temp, wind, and starting-QB ids.
+- **v2 model** (`ratings/v2.py`): named feature sets — base (=v1, numerically
+  identical, asserted by test), +sched (rest/neutral/dome), +split
+  (pass/rush opponent-adjusted EWMAs), +qb (lag-starter QB delta + CPOE).
+  Writes `live_state_v2_shadow.json` and attaches shadow projections to each
+  board history run. Starter = highest-volume passer of the prior completed
+  game (leak-free; unknown -> `qb_uncertain`, contributes zero).
+- **Ablation backtest** (`backtest_v2.py`, tune 2015–2022, holdout 2023–2025,
+  raw probs vs de-vigged closing): **no feature family beats the market.**
+
+  | set | pts MAE | sp LL | tot LL | ml LL |
+  |---|---|---|---|---|
+  | base | 7.44 | 0.7204 | 0.7045 | 0.6383 |
+  | full | 7.42 | 0.7199 | 0.7075 | 0.6374 |
+  | market | — | 0.6934 | 0.6933 | 0.6077 |
+
+  Schedule/split/QB context shave ~0.02 points MAE but leave log-loss/Brier at
+  market parity (spread/total raw are still overconfident; ML still loses).
+  Consistent with the tennis verdict: the closing line already prices
+  schedule, pass/rush splits, and QB quality.
+- **Implication:** do not promote v2. Keep grading v1 Core/Lean. The v2 shadow
+  export stays as prospective research; a real pregame QB/injury source is the
+  only remaining lever with plausible upside, and even that is unproven.
+- `grade.py` now closes the shadow loop: for every regular-season game it uses
+  the latest pre-kickoff snapshot and reports v1 vs v2 points/margin/total MAE.
+  Resolved comparison rows export to `grade_*_v2_rows.json`; v2 still has no
+  bet selection, tier, or ROI semantics.
+
+### 2026-08-14 — source-safety hardening + diagnostics
+
+Third preseason dry-run triggered a full-source hardening pass (no model or
+threshold change; `MODEL_VERSION`/`TIER_POLICY_VERSION` unchanged,
+`HISTORY_SCHEMA_VERSION` 1→2 for the richer source diagnostics):
+
+- The Bovada coupon returns HTTP 200 with `{}` when the redundant `lang=en`
+  query parameter is present. Removed; `fetch_live_games` now rejects any
+  non-list response shape before it can overwrite the last-good cache.
+- `_fetch_json` now returns `FetchResult` metadata (mode, attempts,
+  http_status, response_bytes, fetched_at, cache_age, error) and retries once
+  on transient failures (network / 429 / 5xx / malformed shape), falling back
+  to a valid cache, and raising only when no valid cache exists.
+- `fetch_live_games` filters events whose kickoff is in the past or missing —
+  a stale cached board can no longer resurface an already-started game as
+  bettable. `grade.py`'s pre-kickoff snapshot guard is unchanged.
+- Team-total diagnostics now record observed `total`-bearing descriptions
+  that don't match `_TEAM_TOTAL_PATTERNS` (currently only benign "Odd/Even
+  Total Points" / "Total Points Range") plus any team-matched markets missing
+  Over/Under outcomes. This is the fixture we'll use to verify the parser when
+  real team totals post in game week.
+- Terminal output caps Watch rows at 30 (all still exported to history);
+  `run_board.py --all-watch` prints everything.
+- Added `tests/` (`unittest`, no new deps): cache safety, kickoff filtering,
+  main-market + team-total parsing. `python -m unittest discover -s tests`.
+
 ### 2026-08-13 — initial build + first backtest
 
 Tune 2015–2022 (4,346 team-game rows), holdout 2023–2025 (855 games).
@@ -82,6 +147,11 @@ Points MAE 7.44, margin MAE 10.27. Full report:
 - First live pull (2026-08-13): Bovada already posts all 16 Week 1 games
   with spread/ML/total; team totals not yet posted; board produced 4 Leans
   in-window and parked 30–69% EV disagreements in Watch, as designed.
+- Second dry-run found Bovada returning HTTP 200 with `{}` for the NFL coupon
+  when the redundant `lang=en` query parameter was present. Removing it
+  restored 16/16 spread, ML, and game-total coverage; the fetcher now rejects
+  malformed response shapes before replacing its last-good cache. Team totals
+  remain unposted (`tt=0`).
 
 ## Roadmap after go-live
 

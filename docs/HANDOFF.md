@@ -58,7 +58,7 @@ book; its scraper is deferred.
   games; otherwise Lean at best; oversized EV always Watch.
 - Every run exports full history JSON; grading uses the latest pre-kickoff
   snapshot per (matchup, market, side).
-- Versions in `nfl_props/version.py`: schema 1, `nfl-epa-points-v1`,
+- Versions in `nfl_props/version.py`: schema 3, `nfl-epa-points-v1`,
   `core-lean-watch-v1`. Bump the model version only when probabilities
   change.
 

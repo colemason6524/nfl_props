@@ -20,6 +20,8 @@ def main(argv=None) -> int:
     sub.add_parser("build", help="build canonical parquet store + diagnostics")
     sub.add_parser("rebuild-state",
                    help="replay ratings and write live_state.json")
+    sub.add_parser("rebuild-state-v2",
+                   help="replay v2 shadow ratings and write live_state_v2_shadow.json")
 
     args = ap.parse_args(argv)
     config.ensure_dirs()
@@ -35,6 +37,11 @@ def main(argv=None) -> int:
         state = rebuild_state()
         log(f"[cli] live state written (as_of={state['as_of']}, "
             f"{len(state['teams'])} teams)")
+    elif args.command == "rebuild-state-v2":
+        from .ratings.v2 import rebuild_state_v2
+        shadow = rebuild_state_v2()
+        log(f"[cli] v2 shadow state written (as_of={shadow['as_of']}, "
+            f"{len(shadow['teams'])} teams, {len(shadow['qbs'])} qbs)")
     return 0
 
 

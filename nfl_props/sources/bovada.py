@@ -9,8 +9,10 @@ from __future__ import annotations
 
 import json
 import re
+import time
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
+from pathlib import Path
 from typing import Any, Dict, List, Optional
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
@@ -21,7 +23,7 @@ from ..teams import normalize_team
 from ..utils import log
 
 BOVADA_BASE = "https://www.bovada.lv/services/sports/event/coupon/events/A/description"
-BOVADA_NFL_URL = f"{BOVADA_BASE}/football/nfl?marketFilterId=def&preMatchOnly=true&lang=en"
+BOVADA_NFL_URL = f"{BOVADA_BASE}/football/nfl?marketFilterId=def&preMatchOnly=true"
 
 # Team-total naming varies ("Total Points Scored by X", "Team Total - X",
 # "X Total Points"); they are usually posted only during game week.
@@ -98,35 +100,108 @@ def _is_game_period(market: dict) -> bool:
     return desc in ("game", "match", "regulation time", "") or bool(period.get("main"))
 
 
-def _fetch_json(url: str, cache_name: str, refresh: bool = True) -> Any:
-    CACHE_DIR.mkdir(parents=True, exist_ok=True)
-    cache_path = CACHE_DIR / cache_name
-    if cache_path.exists() and not refresh:
-        return json.loads(cache_path.read_text())
+@dataclass
+class FetchResult:
+    payload: Any
+    mode: str                  # "fresh" | "cache"
+    attempts: int
+    http_status: Optional[int]
+    response_bytes: int
+    fetched_at_utc: str
+    cache_age_seconds: float
+    error: Optional[str] = None
+
+    def as_dict(self) -> dict:
+        return {
+            "mode": self.mode,
+            "attempts": self.attempts,
+            "http_status": self.http_status,
+            "response_bytes": self.response_bytes,
+            "fetched_at_utc": self.fetched_at_utc,
+            "cache_age_seconds": round(self.cache_age_seconds, 1),
+            "error": self.error,
+        }
+
+
+def _now_iso() -> str:
+    return datetime.now(timezone.utc).isoformat()
+
+
+def _cache_age(cache_path: Path) -> float:
+    try:
+        return max(0.0, time.time() - cache_path.stat().st_mtime)
+    except OSError:
+        return 0.0
+
+
+def _load_cache(cache_path: Path) -> Optional[list]:
+    """Return the cached payload only if it is a valid list-shaped coupon."""
+    if not cache_path.exists():
+        return None
+    try:
+        cached = json.loads(cache_path.read_text())
+    except (json.JSONDecodeError, OSError):
+        return None
+    return cached if isinstance(cached, list) else None
+
+
+def _fetch_once(url: str) -> tuple[str, int, int]:
     req = Request(url, headers={
         "User-Agent": HTTP_USER_AGENT,
         "Accept": "application/json,text/plain,*/*",
         "Accept-Language": "en-US,en;q=0.9",
     })
-    try:
-        with urlopen(req, timeout=HTTP_TIMEOUT_SECONDS) as resp:
-            payload = resp.read().decode("utf-8", "replace")
-    except (HTTPError, URLError, TimeoutError, OSError) as exc:
-        if cache_path.exists():
-            log(f"[bovada] fetch failed ({exc}); using cached {cache_name}")
-            return json.loads(cache_path.read_text())
-        raise RuntimeError(f"Bovada fetch failed: {exc}") from exc
-    cache_path.write_text(payload)
-    return json.loads(payload)
+    with urlopen(req, timeout=HTTP_TIMEOUT_SECONDS) as resp:
+        text = resp.read().decode("utf-8", "replace")
+        status = int(getattr(resp, "status", 200) or 200)
+        return text, status, len(text.encode("utf-8", "replace"))
 
 
-def fetch_nfl_payload(refresh: bool = True) -> Any:
+def _fetch_json(url: str, cache_name: str, refresh: bool = True) -> FetchResult:
+    CACHE_DIR.mkdir(parents=True, exist_ok=True)
+    cache_path = CACHE_DIR / cache_name
+    if not refresh:
+        cached = _load_cache(cache_path)
+        if cached is None:
+            raise RuntimeError(f"Invalid cached Bovada payload: {cache_name}")
+        return FetchResult(cached, "cache", 0, None, cache_path.stat().st_size,
+                           _now_iso(), _cache_age(cache_path), None)
+
+    last_err: Optional[Exception] = None
+    attempts = 0
+    for attempt in range(2):
+        attempts = attempt + 1
+        try:
+            text, status, nbytes = _fetch_once(url)
+            parsed = json.loads(text)
+            if not isinstance(parsed, list):
+                raise ValueError(f"unexpected payload type {type(parsed).__name__}")
+            cache_path.write_text(text)
+            return FetchResult(parsed, "fresh", attempts, status, nbytes,
+                               _now_iso(), 0.0, None)
+        except (HTTPError, URLError, TimeoutError, OSError,
+                json.JSONDecodeError, ValueError) as exc:
+            last_err = exc
+            if isinstance(exc, HTTPError) and exc.code != 429 and exc.code < 500:
+                break  # client error (except 429) won't improve on retry
+            time.sleep(1.0 * attempt)
+
+    cached = _load_cache(cache_path)
+    if cached is not None:
+        log(f"[bovada] fetch failed ({last_err}); using cached {cache_name}")
+        return FetchResult(cached, "cache", attempts, None,
+                           cache_path.stat().st_size, _now_iso(),
+                           _cache_age(cache_path), str(last_err))
+    raise RuntimeError(f"Bovada fetch failed: {last_err}") from last_err
+
+
+def fetch_nfl_payload(refresh: bool = True) -> FetchResult:
     return _fetch_json(BOVADA_NFL_URL, "bovada_nfl.json", refresh=refresh)
 
 
-def fetch_event_payload(link: str, refresh: bool = True) -> Any:
+def fetch_event_payload(link: str, refresh: bool = True) -> FetchResult:
     safe = re.sub(r"[^a-z0-9]+", "_", link.lower()).strip("_")
-    return _fetch_json(f"{BOVADA_BASE}{link}?lang=en",
+    return _fetch_json(f"{BOVADA_BASE}{link}",
                        f"bovada_event_{safe[:80]}.json", refresh=refresh)
 
 
@@ -182,7 +257,9 @@ def _extract_main_markets(event: dict, game: LiveGame) -> None:
                 continue
 
 
-def _extract_team_totals(event_payload: Any, game: LiveGame) -> None:
+def _extract_team_totals(event_payload: Any, game: LiveGame) -> dict:
+    diag = {"markets_scanned": 0, "team_matched": 0,
+            "unmatched_total_desc": [], "matched_no_outcomes": []}
     for group in event_payload or []:
         for event in group.get("events", []) or []:
             for dg in event.get("displayGroups", []) or []:
@@ -190,24 +267,48 @@ def _extract_team_totals(event_payload: Any, game: LiveGame) -> None:
                     if not (_is_open(market) and _is_game_period(market)):
                         continue
                     desc = str(market.get("description", ""))
+                    diag["markets_scanned"] += 1
+                    if "total" not in desc.lower():
+                        continue
                     team = _team_total_team(desc)
+                    if team is None:
+                        if desc.strip().lower() not in ("total", "game total",
+                                                        "total points"):
+                            diag["unmatched_total_desc"].append(desc)
+                        continue
                     if team not in (game.home, game.away) or team in game.team_totals:
                         continue
+                    diag["team_matched"] += 1
                     outcomes = market.get("outcomes") or []
                     by_desc = {str(o.get("description", "")).strip().lower(): o
                                for o in outcomes}
                     o_o, o_u = by_desc.get("over"), by_desc.get("under")
                     if not (o_o and o_u):
+                        diag["matched_no_outcomes"].append(desc)
                         continue
                     try:
                         am_o, dec_o, line = _price(o_o)
                         am_u, dec_u, _ = _price(o_u)
                     except (KeyError, TypeError, ValueError):
+                        diag["matched_no_outcomes"].append(desc)
                         continue
                     if line is None:
+                        diag["matched_no_outcomes"].append(desc)
                         continue
                     game.team_totals[team] = TwoWayPrice(line, am_o, am_u,
                                                          dec_o, dec_u)
+    return diag
+
+
+def _merge_tt_diags(acc: dict, ed: dict, cap: int = 50) -> None:
+    acc["markets_scanned"] += ed["markets_scanned"]
+    acc["team_matched"] += ed["team_matched"]
+    for key in ("unmatched_total_desc", "matched_no_outcomes"):
+        for item in ed[key]:
+            if len(acc[key]) >= cap:
+                break
+            if item not in acc[key]:
+                acc[key].append(item)
 
 
 def parse_games(payload: Any) -> tuple[List[LiveGame], dict]:
@@ -249,26 +350,64 @@ def parse_games(payload: Any) -> tuple[List[LiveGame], dict]:
 
 
 def fetch_live_games(refresh: bool = True,
-                     fetch_team_totals: bool = True) -> tuple[List[LiveGame], dict]:
-    payload = fetch_nfl_payload(refresh=refresh)
-    games, diags = parse_games(payload)
+                     fetch_team_totals: bool = True,
+                     now: Optional[datetime] = None
+                     ) -> tuple[List[LiveGame], dict]:
+    now = now or datetime.now(timezone.utc)
+    coupon = fetch_nfl_payload(refresh=refresh)
+    games, diags = parse_games(coupon.payload)
+    parsed_count = len(games)
+
+    kept: List[LiveGame] = []
+    stale: List[str] = []
+    missing_kickoff: List[str] = []
+    for game in games:
+        if not game.start_time_utc:
+            missing_kickoff.append(f"{game.away} @ {game.home}")
+            continue
+        try:
+            kickoff = datetime.fromisoformat(
+                game.start_time_utc.replace("Z", "+00:00"))
+        except ValueError:
+            missing_kickoff.append(f"{game.away} @ {game.home}")
+            continue
+        if kickoff <= now:
+            stale.append(f"{game.away} @ {game.home}")
+            continue
+        kept.append(game)
+    games = kept
+
+    event_fetch = {"requested": 0, "fresh": 0, "cache": 0, "failed": 0}
+    tt_diags = {"markets_scanned": 0, "team_matched": 0,
+                "unmatched_total_desc": [], "matched_no_outcomes": []}
     tt_found = 0
     if fetch_team_totals:
         for game in games:
             if not game.link:
                 continue
+            event_fetch["requested"] += 1
             try:
-                event_payload = fetch_event_payload(game.link, refresh=refresh)
+                event = fetch_event_payload(game.link, refresh=refresh)
             except RuntimeError as exc:
+                event_fetch["failed"] += 1
                 log(f"[bovada] event fetch failed for {game.link}: {exc}")
                 continue
-            _extract_team_totals(event_payload, game)
+            event_fetch[event.mode] += 1
+            _merge_tt_diags(tt_diags, _extract_team_totals(event.payload, game))
             tt_found += len(game.team_totals)
     diags.update({
-        "games_parsed": len(games),
+        "games_parsed": parsed_count,
+        "games_kept": len(games),
         "with_moneyline": sum(1 for g in games if g.moneyline),
         "with_spread": sum(1 for g in games if g.spread),
         "with_game_total": sum(1 for g in games if g.game_total),
         "team_totals_found": tt_found,
+        "coupon_fetch": coupon.as_dict(),
+        "event_fetches": event_fetch,
+        "stale_games_filtered": len(stale),
+        "stale_games": stale,
+        "missing_kickoffs_filtered": len(missing_kickoff),
+        "missing_kickoffs": missing_kickoff,
+        "team_total_diagnostics": tt_diags,
     })
     return games, diags

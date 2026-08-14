@@ -28,6 +28,25 @@ Full SSH/clone/bootstrap walkthrough with ordered smoke tests:
 
 Logs: `logs\nfl_board.log`, `logs\nfl_grade.log`.
 
+## Source safety + diagnostics
+
+- The Bovada fetcher validates response shape before caching: an HTTP 200
+  `{}` or other non-list body is treated as a failed fetch, never a silent
+  empty board. Transient failures retry once, then fall back to the last-good
+  cache; with no valid cache it raises rather than export nothing.
+- Events whose kickoff is in the past (or missing) are filtered out of the
+  board, so a stale cached board can't resurface an already-started game.
+- Each run writes fetch metadata + team-total parse diagnostics to
+  `outputs/diagnostics/bovada_coverage_*.json` (`coupon_fetch`,
+  `event_fetches`, `stale_games_filtered`, `team_total_diagnostics`, ...).
+  When team totals first post in game week, check `team_totals_found` and
+  `team_total_diagnostics.unmatched_total_desc` to verify the parser against
+  real market descriptions.
+- Terminal output caps Watch rows at 30 for readability; every candidate is
+  still exported to history. `run_board.py --all-watch` prints all Watch rows.
+- Tests: `.venv\Scripts\python -m unittest discover -s tests` (Mac:
+  `.venv/bin/python -m unittest discover -s tests`).
+
 ## Mac dev equivalents
 
 ```bash
@@ -37,7 +56,25 @@ Logs: `logs\nfl_board.log`, `logs\nfl_grade.log`.
   .venv/bin/python -m nfl_props.cli build && \
   .venv/bin/python -m nfl_props.cli rebuild-state   # weekly rebuild
 .venv/bin/python backtest.py                 # full historical backtest
+.venv/bin/python -m nfl_props.cli rebuild-state-v2  # v2 shadow state (research)
+.venv/bin/python backtest_v2.py              # v2 feature-set ablation
+.venv/bin/python -m unittest discover -s tests   # unit tests
 ```
+
+The v2 shadow model (`ratings/v2.py`, `backtest_v2.py`,
+`rebuild-state-v2`) is research-only: it never changes v1 probabilities or
+tiers. Its ablation backtest is flat vs the market (see `docs/PLAN.md`), so it
+is kept as a graded-shadow pipeline, not promoted. `run_board.py` attaches v2
+shadow projections to history when `live_state_v2_shadow.json` exists.
+`grade.py` selects the latest pre-kickoff v1/v2 projection for every regular-
+season game and reports points, margin, and total MAE side by side. Negative
+`v2-v1` deltas mean v2 was better. Resolved shadow rows are exported separately
+as `outputs/backtests/grade_*_v2_rows.json`; candidate ROI grading remains v1.
+
+Note: `backtest.py`/`backtest_v2.py` may print spurious numpy `RuntimeWarning:
+divide by zero / overflow / invalid value encountered in matmul` on numpy 2.x.
+The numbers are correct (`np.dot` vs `@` is bit-identical for these inputs);
+ignore the warnings.
 
 ## Failure triage
 
