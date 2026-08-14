@@ -1,6 +1,6 @@
 """Discord Core digest — default OFF until a channel exists.
 
-Requires both SEND_DISCORD=true (or --discord) and NFL_DISCORD_WEBHOOK_URL.
+Requires both NFL_SEND_DISCORD=true (or --discord) and NFL_DISCORD_WEBHOOK_URL.
 Sport-specific webhook env on purpose: never reuse another project's webhook
 (playbook lesson: shared webhooks post to the wrong channel).
 """

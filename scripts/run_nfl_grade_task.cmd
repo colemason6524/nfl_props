@@ -20,6 +20,7 @@ echo [%DATE% %TIME%] weekly data refresh >> "logs\nfl_grade.log"
 "%PythonExe%" -m nfl_props.cli refresh-data >> "logs\nfl_grade.log" 2>&1
 "%PythonExe%" -m nfl_props.cli build >> "logs\nfl_grade.log" 2>&1
 "%PythonExe%" -m nfl_props.cli rebuild-state >> "logs\nfl_grade.log" 2>&1
+"%PythonExe%" -m nfl_props.cli rebuild-state-v2 >> "logs\nfl_grade.log" 2>&1
 set REFRESH_EXIT=%ERRORLEVEL%
 
 echo [%DATE% %TIME%] grade_exit=%GRADE_EXIT% refresh_exit=%REFRESH_EXIT% >> "logs\nfl_grade.log"

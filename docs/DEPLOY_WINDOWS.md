@@ -11,7 +11,7 @@ Windows runs.** Repo lives at `C:\Users\muski\nfl_props`, tasks run from the
 | GitHub | `https://github.com/colemason6524/nfl_props` |
 | Python | Windows `python` (3.13.x observed on this box); venv at `.venv\Scripts\python.exe` |
 | Logs | `C:\Users\muski\nfl_props\logs\` |
-| Discord | OFF until `NFL_DISCORD_WEBHOOK_URL` + `SEND_DISCORD=true` are set |
+| Discord | OFF until `NFL_DISCORD_WEBHOOK_URL` + `NFL_SEND_DISCORD=true` are set |
 
 Path note: in an SSH (non-interactive cmd) session, quote paths and prefer
 `cd /d C:\Users\muski\nfl_props &&` prefixes, exactly like the tennis flow.
@@ -181,7 +181,7 @@ daily Tue–Sun; Monday runs are fine too (it will just show the MNF game).
 
 ```powershell
 setx NFL_DISCORD_WEBHOOK_URL "https://discord.com/api/webhooks/..."
-setx SEND_DISCORD "true"
+setx NFL_SEND_DISCORD "true"
 ```
 
 Close and reopen the shell after `setx`; the `.cmd` wrappers also read

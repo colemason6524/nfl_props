@@ -87,7 +87,7 @@ def main() -> int:
                                       v2_shadow=v2_shadow)
         log(f"[board] history -> {history_path}")
 
-    send = args.discord or os.environ.get("SEND_DISCORD", "").lower() in (
+    send = args.discord or os.environ.get("NFL_SEND_DISCORD", "").lower() in (
         "1", "true", "yes")
     if send:
         webhook = os.environ.get("NFL_DISCORD_WEBHOOK_URL", "")

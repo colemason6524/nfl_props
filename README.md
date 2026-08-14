@@ -86,7 +86,7 @@ python3 -m venv .venv
 
 1. Clone the repo to the desktop (e.g. `C:\Users\muski\nfl_props`).
 2. Create `.venv`, install `requirements.txt`.
-3. Optional: set user env `NFL_DISCORD_WEBHOOK_URL` and `SEND_DISCORD=true`.
+3. Optional: set user env `NFL_DISCORD_WEBHOOK_URL` and `NFL_SEND_DISCORD=true`.
 4. Task Scheduler → daily → `scripts\run_nfl_board_task.cmd`.
 5. Tuesday morning task → `scripts\run_nfl_grade_task.cmd` (grades + refreshes data + rebuilds state).
 
@@ -108,7 +108,7 @@ Edge = `p_model − p_market` (de-vigged book).
 Env overrides: `NFL_EV_MIN`, `NFL_EV_MAX`, `NFL_EDGE_MIN`, `NFL_CORE_EV_MIN`,
 `NFL_MIN_TEAM_GAMES`.
 
-Discord posts **Core only** and stays off unless `SEND_DISCORD=true` and
+Discord posts **Core only** and stays off unless `NFL_SEND_DISCORD=true` and
 `NFL_DISCORD_WEBHOOK_URL` are set (sport-specific webhook, never shared).
 
 ## Important honesty notes

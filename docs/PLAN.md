@@ -11,7 +11,7 @@
 | Go-live gate | Backtest vs closing + preseason pipeline dry-run; Week 1 2026 live |
 | Stakes | Flat 1 unit |
 | Voids / cancelled | Pushes wash; grade completed games only |
-| Discord | Core-only digest, `NFL_DISCORD_WEBHOOK_URL`, default off |
+| Discord | Core-only digest, `NFL_DISCORD_WEBHOOK_URL` + `NFL_SEND_DISCORD`, default off |
 
 ## Architecture
 
@@ -121,6 +121,10 @@ threshold change; `MODEL_VERSION`/`TIER_POLICY_VERSION` unchanged,
   `run_board.py --all-watch` prints everything.
 - Added `tests/` (`unittest`, no new deps): cache safety, kickoff filtering,
   main-market + team-total parsing. `python -m unittest discover -s tests`.
+- Windows smoke testing found the task account already had another project's
+  global `SEND_DISCORD=true`. NFL now uses sport-specific
+  `NFL_SEND_DISCORD`, preventing cross-project flags from breaking or sending
+  the NFL board. The Tuesday wrapper also rebuilds both v1 and v2 state.
 
 ### 2026-08-13 — initial build + first backtest
 

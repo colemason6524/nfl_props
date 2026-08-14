@@ -24,7 +24,7 @@ Full SSH/clone/bootstrap walkthrough with ordered smoke tests:
    Start in `C:\Users\muski\nfl_props`.
 5. Grade task (Tue 09:00): same pattern with `run_nfl_grade_task.cmd`.
 6. Discord (when a channel exists): `setx NFL_DISCORD_WEBHOOK_URL "..."` and
-   `setx SEND_DISCORD "true"` for the task account. Default is OFF.
+   `setx NFL_SEND_DISCORD "true"` for the task account. Default is OFF.
 
 Logs: `logs\nfl_board.log`, `logs\nfl_grade.log`.
 

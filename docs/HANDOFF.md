@@ -29,7 +29,7 @@ book; its scraper is deferred.
   deployed. Full walkthrough incl. ordered smoke tests:
   `docs/DEPLOY_WINDOWS.md`. Target: deployed + both Task Scheduler jobs
   live before Week 1 (~2026-09-10).
-- Discord is stubbed and OFF (`NFL_DISCORD_WEBHOOK_URL` + `SEND_DISCORD`).
+- Discord is stubbed and OFF (`NFL_DISCORD_WEBHOOK_URL` + `NFL_SEND_DISCORD`).
 - Local-only artifacts (gitignored, rebuilt from `refresh-data`): `data/`,
   `outputs/`, `.cache/`, `.venv/`.
 - For a brand-new conversation, paste `docs/AGENT_INTRO_PROMPT.md`.
