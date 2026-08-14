@@ -31,6 +31,8 @@ Roadmap and findings log: [`docs/PLAN.md`](docs/PLAN.md).
 Day-to-day ops: [`docs/OPERATIONS.md`](docs/OPERATIONS.md).
 Module map: [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md).
 **Handoff / current state (read first in a new chat):** [`docs/HANDOFF.md`](docs/HANDOFF.md).
+**Paste-ready agent prompt:** [`docs/AGENT_INTRO_PROMPT.md`](docs/AGENT_INTRO_PROMPT.md).
+**Windows deploy walkthrough:** [`docs/DEPLOY_WINDOWS.md`](docs/DEPLOY_WINDOWS.md).
 
 ## Design decisions (locked)
 

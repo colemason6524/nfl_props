@@ -10,19 +10,29 @@ book; its scraper is deferred.
 
 ## Current state (2026-08-13)
 
+- Git: pushed to https://github.com/colemason6524/nfl_props (`main`;
+  initial build `b0999ce`, deployment doc `9f8bea6`). HTTPS remote, same
+  convention as tennis_props.
 - Full pipeline works end to end on this Mac: `refresh-data` → `build`
   (pbp match rate 1.0000 for 2013–2025) → `rebuild-state` → `run_board.py`
   (parsed all 16 Week 1 2026 games from Bovada) → `grade.py` (verified on a
-  synthetic snapshot of a completed 2025 game).
+  synthetic snapshot of a completed 2025 game; live Week 1 rows correctly
+  pending).
 - 2026 pbp is not published yet (404 → skipped automatically); ratings state
   is as of the 2025 season finale (2026-02-08).
 - Bovada team totals are not posted yet for Week 1; the board logs
   `team_totals_found=0` and continues. Verify the team-total parser against
   real markets during game week — the market-description patterns in
   `sources/bovada.py::_TEAM_TOTAL_PATTERNS` were written from known naming
-  variants, not observed payloads.
-- Windows tasks are written but NOT yet scheduled (`scripts/*.cmd`).
+  variants, not observed payloads. **This is the top open risk.**
+- Windows prod (`C:\Users\muski\nfl_props`, SSH host `windows`) is NOT yet
+  deployed. Full walkthrough incl. ordered smoke tests:
+  `docs/DEPLOY_WINDOWS.md`. Target: deployed + both Task Scheduler jobs
+  live before Week 1 (~2026-09-10).
 - Discord is stubbed and OFF (`NFL_DISCORD_WEBHOOK_URL` + `SEND_DISCORD`).
+- Local-only artifacts (gitignored, rebuilt from `refresh-data`): `data/`,
+  `outputs/`, `.cache/`, `.venv/`.
+- For a brand-new conversation, paste `docs/AGENT_INTRO_PROMPT.md`.
 
 ## Backtest verdict (2026-08-13, tune 2015–2022, holdout 2023–2025)
 
