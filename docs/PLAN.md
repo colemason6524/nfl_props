@@ -128,6 +128,10 @@ threshold change; `MODEL_VERSION`/`TIER_POLICY_VERSION` unchanged,
 - Windows also exposed Bovada 429s when fetching 16 event payloads in a burst.
   Event requests are now spaced one second apart and transient retry backoff
   occurs before the retry, preserving game-week team-total coverage.
+- Windows deployed 2026-08-14. Smoke tests 4.1–4.6 passed; `nfl_props_daily`
+  (11:00 daily) and `nfl_props_grade` (09:00 Tuesday) run passwordless S4U as
+  `colemason41`. Manual scheduler runs returned 0 and the grade wrapper rebuilt
+  both v1/v2 states with `pbp_match_rate=1.0`.
 
 ### 2026-08-13 — initial build + first backtest
 

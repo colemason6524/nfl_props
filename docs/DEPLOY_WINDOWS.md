@@ -177,6 +177,19 @@ In-season calendar note: Thu/Sun/Mon games all resolve by Tuesday morning,
 so one weekly grade task covers everything. Keep the board task running
 daily Tue–Sun; Monday runs are fine too (it will just show the MNF game).
 
+Current deployment (2026-08-14):
+
+- `nfl_props_daily`: daily 11:00 AM
+- `nfl_props_grade`: Tuesday 9:00 AM
+- Principal: passwordless S4U `colemason41`, highest privileges
+- Working directory: `C:\Users\muski\nfl_props`
+- Manual task tests: both `Last Result: 0`; wrapper logs ended with
+  `exit=0` / `grade_exit=0 refresh_exit=0`
+
+The installed Python is a user-scoped Windows Store package, so `SYSTEM`
+cannot launch the venv even though file ACLs allow it. Use the S4U user
+principal above rather than `SYSTEM` on this host.
+
 ## 6. Discord (later, when the channel exists)
 
 ```powershell

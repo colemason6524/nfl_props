@@ -25,10 +25,10 @@ book; its scraper is deferred.
   real markets during game week — the market-description patterns in
   `sources/bovada.py::_TEAM_TOTAL_PATTERNS` were written from known naming
   variants, not observed payloads. **This is the top open risk.**
-- Windows prod (`C:\Users\muski\nfl_props`, SSH host `windows`) is NOT yet
-  deployed. Full walkthrough incl. ordered smoke tests:
-  `docs/DEPLOY_WINDOWS.md`. Target: deployed + both Task Scheduler jobs
-  live before Week 1 (~2026-09-10).
+- Windows prod is deployed at `C:\Users\muski\nfl_props` (SSH host
+  `windows`). Smoke tests 4.1–4.6 passed 2026-08-14; Task Scheduler jobs
+  `nfl_props_daily` (daily 11:00) and `nfl_props_grade` (Tuesday 09:00) are
+  enabled under passwordless S4U `colemason41` and manually returned 0.
 - Discord is stubbed and OFF (`NFL_DISCORD_WEBHOOK_URL` + `NFL_SEND_DISCORD`).
 - Local-only artifacts (gitignored, rebuilt from `refresh-data`): `data/`,
   `outputs/`, `.cache/`, `.venv/`.

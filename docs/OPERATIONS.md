@@ -26,6 +26,11 @@ Full SSH/clone/bootstrap walkthrough with ordered smoke tests:
 6. Discord (when a channel exists): `setx NFL_DISCORD_WEBHOOK_URL "..."` and
    `setx NFL_SEND_DISCORD "true"` for the task account. Default is OFF.
 
+Deployed 2026-08-14: `nfl_props_daily` (daily 11:00) and `nfl_props_grade`
+(Tuesday 09:00), passwordless S4U as `colemason41`, highest privileges,
+working directory `C:\Users\muski\nfl_props`. Both were manually triggered
+and returned `Last Result: 0`.
+
 Logs: `logs\nfl_board.log`, `logs\nfl_grade.log`.
 
 ## Source safety + diagnostics
