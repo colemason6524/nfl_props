@@ -12,13 +12,18 @@ Team totals usually appear on Bovada during game week; earlier runs will log
 
 ## Windows Task Scheduler setup
 
+Full SSH/clone/bootstrap walkthrough with ordered smoke tests:
+[`DEPLOY_WINDOWS.md`](DEPLOY_WINDOWS.md). Summary:
+
 1. Clone to `C:\Users\muski\nfl_props`; create `.venv`; `pip install -r requirements.txt`.
 2. One-time data bootstrap: `python -m nfl_props.cli refresh-data`, `build`, `rebuild-state`.
-3. Board task (daily, e.g. 11:00): Program `C:\Windows\System32\cmd.exe`,
+3. Run the smoke tests (deps, build diagnostics, state, board, grade,
+   wrapper-exact cmd.exe invocations) — all must pass first.
+4. Board task (daily, e.g. 11:00): Program `C:\Windows\System32\cmd.exe`,
    arguments `/c ""C:\Users\muski\nfl_props\scripts\run_nfl_board_task.cmd""`,
    Start in `C:\Users\muski\nfl_props`.
-4. Grade task (Tue 09:00): same pattern with `run_nfl_grade_task.cmd`.
-5. Discord (when a channel exists): `setx NFL_DISCORD_WEBHOOK_URL "..."` and
+5. Grade task (Tue 09:00): same pattern with `run_nfl_grade_task.cmd`.
+6. Discord (when a channel exists): `setx NFL_DISCORD_WEBHOOK_URL "..."` and
    `setx SEND_DISCORD "true"` for the task account. Default is OFF.
 
 Logs: `logs\nfl_board.log`, `logs\nfl_grade.log`.

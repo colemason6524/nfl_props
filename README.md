@@ -88,7 +88,8 @@ python3 -m venv .venv
 4. Task Scheduler → daily → `scripts\run_nfl_board_task.cmd`.
 5. Tuesday morning task → `scripts\run_nfl_grade_task.cmd` (grades + refreshes data + rebuilds state).
 
-Logs: `logs\nfl_board.log`, `logs\nfl_grade.log`. See `docs/OPERATIONS.md`.
+Logs: `logs\nfl_board.log`, `logs\nfl_grade.log`. See `docs/OPERATIONS.md`
+and the full SSH/clone/smoke-test walkthrough in `docs/DEPLOY_WINDOWS.md`.
 
 ## Live tiers (current defaults)
 
