@@ -10,10 +10,22 @@ import tempfile
 import unittest
 from pathlib import Path
 from unittest import mock
+from urllib.parse import parse_qs, urlparse
 
 from nfl_props.sources import bovada
 
 VALID = [{"path": [{"description": "Football"}], "events": []}]
+
+
+class CouponUrlTests(unittest.TestCase):
+    def test_coupon_url_drops_prematchonly(self):
+        parsed = urlparse(bovada.BOVADA_NFL_URL)
+        query = parse_qs(parsed.query)
+        self.assertNotIn("preMatchOnly", query)
+        self.assertEqual(query.get("marketFilterId"), ["def"])
+        self.assertEqual(parsed.path,
+                         "/services/sports/event/coupon/events/A/description"
+                         "/football/nfl")
 
 
 class FetchJsonCacheTests(unittest.TestCase):

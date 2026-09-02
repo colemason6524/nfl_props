@@ -23,7 +23,7 @@ from ..teams import normalize_team
 from ..utils import log
 
 BOVADA_BASE = "https://www.bovada.lv/services/sports/event/coupon/events/A/description"
-BOVADA_NFL_URL = f"{BOVADA_BASE}/football/nfl?marketFilterId=def&preMatchOnly=true"
+BOVADA_NFL_URL = f"{BOVADA_BASE}/football/nfl?marketFilterId=def"
 BOVADA_EVENT_DELAY_SECONDS = 1.0
 
 # Team-total naming varies ("Total Points Scored by X", "Team Total - X",
