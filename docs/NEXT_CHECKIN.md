@@ -1,11 +1,14 @@
 # NFL Props — Next Check-In
 
 ## 1. Status
-Production migrated 2026-09-07: Windows retired, Azure VM live with systemd
-timers (`nfl-props-board` daily 11:00, `nfl-props-grade` Tue 09:00, both
-America/Detroit). Board snapshots green through Sep 7 (34 snapshots on the
-Mac, including 29 migrated from Windows). Zero grades yet — first grade task
-fires Tue Sep 8 on the VM; Week 1 kicks off ~Sep 9–10.
+Production migrated 2026-09-07/08 and **verified live**: Windows retired
+(tasks disabled), Azure VM running systemd timers (`nfl-props-board` daily
+11:00, `nfl-props-grade` Tue 09:00, both America/Detroit). Both services
+were triggered manually under systemd and returned exit 0; grading over the
+migrated 35-snapshot history reports `graded 0 | pending 18 | unmatched 0`.
+The interim tmux scheduler experiment (bash while-loops in tmux) was
+removed. First scheduled grade fires TODAY Tue Sep 8 09:00 ET; Week 1
+kicks off ~Sep 9–10.
 
 ## 2. Next action — WHEN: Tue Sep 8 09:00 ET (first `nfl-props-grade` timer run)
 - Verify the grade service runs clean under systemd: `journalctl -u

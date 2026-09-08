@@ -85,6 +85,13 @@ Mac with the bulk/canonical copy of files.
   latest pre-kickoff snapshot per key, so extra snapshots are always safe.
 - Mac role going forward: dev + canonical file copy. Keep it current with
   `git pull`; no scheduled runs on the Mac.
+- Verified live 2026-09-08 (~04:00 UTC): timers enabled with correct
+  ET→UTC conversion (grade 13:00 UTC = Tue 09:00 Detroit; board 15:00 UTC =
+  11:00); manual `systemctl start` runs of both services returned 0; board
+  Core=0/Lean=5/Watch=143 with v2 shadow, grade `graded 0 | pending 18 |
+  unmatched 0` over the migrated 35-snapshot history, v1+v2 states rebuilt at
+  `pbp_match_rate=1.0000`. Windows jobs disabled the same hour. First
+  scheduled grade: Tue Sep 8 09:00 ET on the VM.
 
 ### 2026-08-14 — v2 shadow candidate (data foundation + ablation: flat)
 

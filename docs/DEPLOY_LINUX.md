@@ -4,6 +4,15 @@ Production moved here 2026-09-07 when the Windows box was retired. Same
 product semantics as the Windows deploy (daily board, Tuesday grade + v1/v2
 rebuild, flat 1u, Discord Core-only), Linux-native scheduling.
 
+**Deployed and verified 2026-09-08 04:00 UTC:** units installed, both timers
+`enabled` with correct ET→UTC conversion (grade Tue 13:00 UTC = 09:00
+Detroit, board 15:00 UTC = 11:00 Detroit); manual `systemctl start` of both
+services returned exit 0; board run graded 16 games (Core=0, Lean=5,
+Watch=143) and wrote history; grade run reported
+`graded 0 | pending 18 | unmatched 0` with the migrated 35-snapshot history
+and rebuilt v1+v2 state at `pbp_match_rate=1.0000`. The old tmux scheduler
+experiment was removed at the same time.
+
 | Item | Value |
 |---|---|
 | Host | Azure VM, Ubuntu 22.04, 2 vCPU, ~1 GB RAM, disk UTC timezone |
