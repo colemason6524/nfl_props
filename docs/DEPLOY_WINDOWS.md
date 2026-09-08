@@ -1,5 +1,10 @@
 # Windows deployment — SSH, clone, smoke tests, scheduled runs
 
+> **RETIRED 2026-09-07.** Production moved to the Azure VM with systemd
+> timers — see [`DEPLOY_LINUX.md`](DEPLOY_LINUX.md). The Windows machine is
+> being disposed of; its `outputs/` history and logs were copied to the Mac
+> first. Kept below for reference only.
+
 Production convention (same as tennis_props / mlb_props): **Mac develops,
 Windows runs.** Repo lives at `C:\Users\muski\nfl_props`, tasks run from the
 `.venv`, changes arrive via `git pull` over SSH.

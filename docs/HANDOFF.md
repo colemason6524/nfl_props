@@ -8,28 +8,32 @@ cross-sport playbook (`tennis_props/docs/PLAYBOOK.md`). Free data only:
 nflverse historical parquet/CSV + Bovada live JSON. FanDuel is the bet-at
 book; its scraper is deferred.
 
-## Current state (2026-08-13)
+## Current state (2026-09-07)
 
-- Git: pushed to https://github.com/colemason6524/nfl_props (`main`;
-  initial build `b0999ce`, deployment doc `9f8bea6`). HTTPS remote, same
-  convention as tennis_props.
+- Git: pushed to https://github.com/colemason6524/nfl_props (`main`).
 - Full pipeline works end to end on this Mac: `refresh-data` → `build`
-  (pbp match rate 1.0000 for 2013–2025) → `rebuild-state` → `run_board.py`
-  (parsed all 16 Week 1 2026 games from Bovada) → `grade.py` (verified on a
-  synthetic snapshot of a completed 2025 game; live Week 1 rows correctly
-  pending).
-- 2026 pbp is not published yet (404 → skipped automatically); ratings state
-  is as of the 2025 season finale (2026-02-08).
-- Bovada team totals are not posted yet for Week 1; the board logs
-  `team_totals_found=0` and continues. Verify the team-total parser against
-  real markets during game week — the market-description patterns in
-  `sources/bovada.py::_TEAM_TOTAL_PATTERNS` were written from known naming
-  variants, not observed payloads. **This is the top open risk.**
-- Windows prod is deployed at `C:\Users\muski\nfl_props` (SSH host
-  `windows`). Smoke tests 4.1–4.6 passed 2026-08-14; Task Scheduler jobs
-  `nfl_props_daily` (daily 11:00) and `nfl_props_grade` (Tuesday 09:00) are
-  enabled under passwordless S4U `colemason41` and manually returned 0.
-- Discord is stubbed and OFF (`NFL_DISCORD_WEBHOOK_URL` + `NFL_SEND_DISCORD`).
+  (pbp match rate 1.0000 for 2013–2025) → `rebuild-state[-v2]` →
+  `run_board.py` → `grade.py`.
+- 2026 pbp 404s until the season's first games are published; ratings state
+  is as of the 2025 season finale (2026-02-08) until the first weekly
+  rebuild.
+- Verify the team-total parser against real markets during game week — the
+  market-description patterns in `sources/bovada.py::_TEAM_TOTAL_PATTERNS`
+  were written from known naming variants, not observed payloads, and
+  `team_total_diagnostics` in the coverage JSON is the fixture for that.
+  **This is the top open risk.**
+- **Windows prod RETIRED 2026-09-07** (machine being disposed of; both Task
+  Scheduler jobs disabled after running green since 2026-08-14; `outputs/`
+  history + logs migrated to the Mac).
+- **Linux prod live: Azure VM** (`ssh -i ~/Downloads/RunThemScripts_key.pem
+  azureuser@130.131.0.6`), repo `~/nfl_props`, systemd timers
+  `nfl-props-board` (daily 11:00) + `nfl-props-grade` (Tue 09:00), both
+  America/Detroit via `OnCalendar` TZ suffix. Deploy/verify:
+  `docs/DEPLOY_LINUX.md`. Mac keeps the bulk of files (canonical history
+  copy); an interim tmux scheduler experiment was replaced by systemd.
+- Discord: env file `~/.config/nfl_props/env` on the VM carries
+  `NFL_SEND_DISCORD` + `NFL_DISCORD_WEBHOOK_URL` (Core-only digest; empty
+  Core sends nothing).
 - Local-only artifacts (gitignored, rebuilt from `refresh-data`): `data/`,
   `outputs/`, `.cache/`, `.venv/`.
 - For a brand-new conversation, paste `docs/AGENT_INTRO_PROMPT.md`.

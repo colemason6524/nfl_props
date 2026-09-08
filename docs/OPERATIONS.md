@@ -2,36 +2,37 @@
 
 ## Weekly rhythm (in season)
 
-| When | What | Command |
+| When (America/Detroit) | What | Runs on |
 |---|---|---|
-| Tue morning | Grade finished week, refresh data, rebuild state | `scripts\run_nfl_grade_task.cmd` (or `grade.py` + `cli refresh-data/build/rebuild-state`) |
-| Tue–Sun (daily) | Live board (lines move all week) | `scripts\run_nfl_board_task.cmd` (or `run_board.py`) |
+| Daily 11:00 | Live board (lines move all week) | Azure VM systemd timer `nfl-props-board` |
+| Tue 09:00 | Grade finished week, refresh data, rebuild v1+v2 state | Azure VM systemd timer `nfl-props-grade` |
 
-Team totals usually appear on Bovada during game week; earlier runs will log
-`team_totals_found=0` — that is coverage, not failure.
+On the VM these call `scripts/run_nfl_linux_task.sh {board|grade}`; the grade
+task chains `grade.py` → `refresh-data` → `build` → `rebuild-state` →
+`rebuild-state-v2`. Manual equivalents on any host: `run_board.py` /
+`grade.py` + the cli chain. Team totals usually appear on Bovada during game
+week; earlier runs log `team_totals_found=0` — that is coverage, not failure.
 
-## Windows Task Scheduler setup
+## Linux production (Azure VM) — current
+
+Deploy/verify steps: [`DEPLOY_LINUX.md`](DEPLOY_LINUX.md). Summary:
+
+- Repo `~/nfl_props` on `azureuser@130.131.0.6`; venv; one-time data
+  bootstrap (`refresh-data` → `build` → `rebuild-state[-v2]`).
+- systemd: `scripts/systemd/nfl-props-{board,grade}.{service,timer}`,
+  installed to `/etc/systemd/system`, `enable --now`, `Persistent=true`.
+- Env/config in `~/.config/nfl_props/env`; logs in
+  `logs/nfl_board.log` / `logs/nfl_grade.log` plus `journalctl`.
+- Verify: `systemctl list-timers | grep nfl-props`, trigger a service once,
+  check the log endings (`exit=0`, `grade_exit=0 refresh_exit=0`).
+
+## Windows Task Scheduler setup (RETIRED)
 
 Full SSH/clone/bootstrap walkthrough with ordered smoke tests:
-[`DEPLOY_WINDOWS.md`](DEPLOY_WINDOWS.md). Summary:
-
-1. Clone to `C:\Users\muski\nfl_props`; create `.venv`; `pip install -r requirements.txt`.
-2. One-time data bootstrap: `python -m nfl_props.cli refresh-data`, `build`, `rebuild-state`.
-3. Run the smoke tests (deps, build diagnostics, state, board, grade,
-   wrapper-exact cmd.exe invocations) — all must pass first.
-4. Board task (daily, e.g. 11:00): Program `C:\Windows\System32\cmd.exe`,
-   arguments `/c ""C:\Users\muski\nfl_props\scripts\run_nfl_board_task.cmd""`,
-   Start in `C:\Users\muski\nfl_props`.
-5. Grade task (Tue 09:00): same pattern with `run_nfl_grade_task.cmd`.
-6. Discord (when a channel exists): `setx NFL_DISCORD_WEBHOOK_URL "..."` and
-   `setx NFL_SEND_DISCORD "true"` for the task account. Default is OFF.
-
-Deployed 2026-08-14: `nfl_props_daily` (daily 11:00) and `nfl_props_grade`
-(Tuesday 09:00), passwordless S4U as `colemason41`, highest privileges,
-working directory `C:\Users\muski\nfl_props`. Both were manually triggered
-and returned `Last Result: 0`.
-
-Logs: `logs\nfl_board.log`, `logs\nfl_grade.log`.
+[`DEPLOY_WINDOWS.md`](DEPLOY_WINDOWS.md) — retired 2026-09-07 when the box
+was decommissioned; `nfl_props_daily` (daily 11:00) and `nfl_props_grade`
+(Tuesday 09:00) ran green from 2026-08-14 until then and were disabled at
+retirement. History/logs were migrated to the Mac before shutdown.
 
 ## Source safety + diagnostics
 

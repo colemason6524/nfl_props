@@ -1,0 +1,11 @@
+[Unit]
+Description=nfl_props daily board (Bovada snapshot + Core/Lean/Watch tiers)
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=oneshot
+User=azureuser
+WorkingDirectory=/home/azureuser/nfl_props
+ExecStart=/home/azureuser/nfl_props/scripts/run_nfl_linux_task.sh board
+TimeoutStartSec=50min

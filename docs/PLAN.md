@@ -57,6 +57,35 @@ are absolute gates; presentation and history never change thresholds.
 
 ## Findings log
 
+### 2026-09-07 — production moved Windows → Azure VM (systemd timers)
+
+Windows (Task Scheduler `nfl_props_daily`/`nfl_props_grade`, S4U
+`colemason41`) ran green from 2026-08-14 through 2026-09-07 and was retired;
+both jobs were disabled only after the replacement was verified live, so
+there was no snapshot gap. The box is being disposed of; its `outputs/`
+history (29 snapshots) and logs were copied to the Mac first, leaving the
+Mac with the bulk/canonical copy of files.
+
+- New prod: Azure VM (`azureuser@130.131.0.6`, Ubuntu 22.04, 2 vCPU,
+  ~1 GB RAM, TZ UTC). Repo `~/nfl_props`, venv, data bootstrapped (~250 MB
+  raw pbp kept for the weekly rebuild); a previous session had already
+  dry-run the board there.
+- Scheduling: systemd system units `nfl-props-{board,grade}.{service,timer}`
+  (`scripts/systemd/`, install steps in `docs/DEPLOY_LINUX.md`), both
+  `OnCalendar ... America/Detroit` (`OnCalendar` TZ suffix keeps 11:00 / Tue
+  09:00 ET semantics on a UTC host), `Persistent=true`, oneshot services
+  with generous `TimeoutStartSec`, and a shared flock in the runner so
+  board/grade never overlap. An interim tmux-scheduler experiment (bash
+  while-loops in tmux windows) was removed — it had already died silently on
+  the VM; systemd is the "what we really need" replacement.
+- Config lives in `~/.config/nfl_props/env` (TZ, NFL_SEND_DISCORD,
+  NFL_DISCORD_WEBHOOK_URL — Core-only digest; the board runner hard-fails if
+  the webhook is missing, a deliberate tripwire).
+- Grading continuity: history superset migrated; `grade.py` keeps only the
+  latest pre-kickoff snapshot per key, so extra snapshots are always safe.
+- Mac role going forward: dev + canonical file copy. Keep it current with
+  `git pull`; no scheduled runs on the Mac.
+
 ### 2026-08-14 — v2 shadow candidate (data foundation + ablation: flat)
 
 Built a parallel v2 candidate model, research-only, without touching v1

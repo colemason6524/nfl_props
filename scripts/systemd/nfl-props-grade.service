@@ -1,0 +1,11 @@
+[Unit]
+Description=nfl_props weekly grade + v1/v2 rebuild (Tuesday morning)
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=oneshot
+User=azureuser
+WorkingDirectory=/home/azureuser/nfl_props
+ExecStart=/home/azureuser/nfl_props/scripts/run_nfl_linux_task.sh grade
+TimeoutStartSec=100min

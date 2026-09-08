@@ -1,0 +1,10 @@
+[Unit]
+Description=nfl_props weekly grade at Tue 09:00 America/Detroit
+
+[Timer]
+OnCalendar=Tue *-*-* 09:00:00 America/Detroit
+Persistent=true
+Unit=nfl-props-grade.service
+
+[Install]
+WantedBy=timers.target
