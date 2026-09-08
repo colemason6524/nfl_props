@@ -40,6 +40,54 @@ def _blank_team() -> dict:
             "season": None, "games_season": 0}
 
 
+def carryover_view(t: dict, target_season: int,
+                   fields: Sequence[str] = ("off", "def")) -> Tuple[dict, bool]:
+    """Replay-state team `t` as the replay would see it entering `target_season`.
+
+    `replay` multiplies ratings by SEASON_CARRYOVER the first time a team
+    appears in a new season. A team that has not yet played in
+    `target_season` never reaches that branch, so its raw state still
+    carries full prior-season strength -- while the backtest priced every
+    boundary game off the regressed value. This returns a regressed COPY
+    (no mutation of replay state) so live_state.json matches the backtest.
+    It is applied exactly once: rebuild_state always re-replays from
+    scratch, and once the team has played in `target_season` the replay
+    has already regressed it, so `season < target_season` is False here.
+
+    Returns (view, regressed_flag).
+    """
+    view = dict(t)
+    regressed = (t["season"] is not None and target_season is not None
+                 and t["season"] < target_season)
+    if regressed:
+        for f in fields:
+            view[f] = t[f] * SEASON_CARRYOVER
+    return view, regressed
+
+
+def export_teams(teams: Dict[str, dict], target_season: int) -> Dict[str, dict]:
+    """Live-state team block for `target_season` (carryover-regressed view).
+
+    Teams that have not yet played in `target_season` are regressed by
+    SEASON_CARRYOVER exactly as `replay` would at their first game, so the
+    live board prices the same ratings the backtest did at the boundary.
+    """
+    out = {}
+    for team, t in teams.items():
+        v, regressed = carryover_view(t, target_season)
+        games_season = t["games_season"] if t["season"] == target_season else 0
+        out[team] = {
+            "off": round(v["off"], 5),
+            "def": round(v["def"], 5),
+            "pace": round(t["pace"], 2) if t["pace"] is not None else None,
+            "games_total": t["games_total"],
+            "last_season": t["season"],
+            "games_current_season": games_season,
+            "carryover_applied": regressed,
+        }
+    return out
+
+
 def replay(games: pd.DataFrame, team_games: pd.DataFrame
            ) -> Tuple[pd.DataFrame, dict]:
     """Return (per-team-game point-in-time features, final replay state)."""
@@ -326,23 +374,14 @@ def rebuild_state(fit_seasons: Optional[Sequence[int]] = None) -> dict:
     fit = fit_projection(features, seasons)
     fit["prob_shrink"] = fit_prob_shrinks(features, games, fit, seasons)
 
-    teams_out = {}
-    for team, t in state["teams"].items():
-        games_season = t["games_season"] if t["season"] == CURRENT_SEASON else 0
-        teams_out[team] = {
-            "off": round(t["off"], 5),
-            "def": round(t["def"], 5),
-            "pace": round(t["pace"], 2) if t["pace"] is not None else None,
-            "games_total": t["games_total"],
-            "last_season": t["season"],
-            "games_current_season": games_season,
-        }
+    teams_out = export_teams(state["teams"], CURRENT_SEASON)
 
     live_state = {
         "model_version": MODEL_VERSION,
         "as_of": str(features["gameday"].max()),
         "built_at": datetime.now(timezone.utc).isoformat(),
         "current_season": CURRENT_SEASON,
+        "season_carryover": SEASON_CARRYOVER,
         "league": {k: round(v, 5) for k, v in state["league"].items()},
         "teams": teams_out,
         **fit,

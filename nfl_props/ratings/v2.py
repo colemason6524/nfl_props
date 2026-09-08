@@ -29,7 +29,7 @@ import pandas as pd
 
 from ..config import CURRENT_SEASON, FIRST_SEASON, PROCESSED_DIR
 from .epa import (ALPHA_LEAGUE, ALPHA_PACE, ALPHA_RATING, SEASON_CARRYOVER,
-                  fit_rows)
+                  carryover_view, fit_rows)
 
 LIVE_STATE_V2_PATH = PROCESSED_DIR / "live_state_v2_shadow.json"
 MODEL_VERSION_V2 = "nfl-epa-points-v2-shadow"
@@ -452,19 +452,23 @@ def rebuild_state_v2(fit_seasons: Optional[Sequence[int]] = None,
     fit = fit_v2(features, seasons, list(feature_names))
 
     teams_out = {}
+    v2_fields = ("off", "def", "off_pass", "def_pass", "off_rush", "def_rush")
     for team, t in state["teams"].items():
+        # same preseason carryover view as epa.export_teams (live == replay)
+        v, regressed = carryover_view(t, CURRENT_SEASON, fields=v2_fields)
         games_season = t["games_season"] if t["season"] == CURRENT_SEASON else 0
         teams_out[team] = {
-            "off": round(t["off"], 5),
-            "def": round(t["def"], 5),
+            "off": round(v["off"], 5),
+            "def": round(v["def"], 5),
             "pace": round(t["pace"], 2) if t["pace"] is not None else None,
-            "off_pass": round(t["off_pass"], 5),
-            "def_pass": round(t["def_pass"], 5),
-            "off_rush": round(t["off_rush"], 5),
-            "def_rush": round(t["def_rush"], 5),
+            "off_pass": round(v["off_pass"], 5),
+            "def_pass": round(v["def_pass"], 5),
+            "off_rush": round(v["off_rush"], 5),
+            "def_rush": round(v["def_rush"], 5),
             "games_total": t["games_total"],
             "last_season": t["season"],
             "games_current_season": games_season,
+            "carryover_applied": regressed,
             "last_qb_id": t.get("last_qb_id"),
         }
 

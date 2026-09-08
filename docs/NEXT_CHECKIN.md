@@ -1,5 +1,21 @@
 # NFL Props — Next Check-In
 
+## 0. Tue Sep 8 audit fix (deployed to the Azure VM)
+- **Season carryover in live state** (`ratings/epa.py`, `ratings/v2.py`):
+  `rebuild-state` exported raw replay state, so all 32 teams (no 2026 game
+  yet) carried full 2025 strength into live boards while the backtest
+  regressed them by SEASON_CARRYOVER=0.60 at the season boundary. Export
+  now goes through `export_teams()`/`carryover_view()` — a regressed VIEW
+  (no state mutation), applied exactly once because every rebuild
+  re-replays from scratch and a team that has played in 2026 is already
+  regressed inside `replay`. New `carryover_applied` flag per team and
+  `season_carryover` in live_state.json. Week-1 boards are now priced off
+  the same ratings the backtest used for week-1 games.
+- Implied team-total sign audited: nflverse `spread_line` is the home
+  margin expectation (positive = home favored), so the existing
+  (total + spread)/2 home / (total − spread)/2 away is correct — no change.
+- Tests 25 → 29 on the Mac (`tests/test_ratings_export.py`).
+
 ## 1. Status
 Production migrated 2026-09-07/08 and **verified live**: Windows retired
 (tasks disabled), Azure VM running systemd timers (`nfl-props-board` daily
