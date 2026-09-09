@@ -57,6 +57,25 @@ are absolute gates; presentation and history never change thresholds.
 
 ## Findings log
 
+### 2026-09-09 — one side per market family; model v1.1 / tier v2; team totals verified
+
+- Adopted CFB's one-side rule (`cfb_props` decision-policy-v2): only the
+  max-EV side of each (game, market) family — per-team for team totals — can
+  be Core/Lean. The opposite side is flagged `OPPOSITE_SIDE` and held in
+  Watch (`board.apply_single_side`, deterministic on EV ties). Both sides
+  still export to history; the ledger grades one side per line.
+- Version bumps per house rules: `MODEL_VERSION` → `nfl-epa-points-v1.1`
+  (the carryover-export fix changed live probabilities without a bump),
+  `TIER_POLICY_VERSION` → `core-lean-watch-v2` (gate change). Schema stays 3
+  (flags + tier already exported).
+- Verified on the live board: 160 candidates, 80 flagged `OPPOSITE_SIDE`,
+  exactly one Core/Lean side per family; history stamps model v1.1 / tier v2.
+- Team totals posted game week and parsed: `team_totals_found` = 32 (16 × 2),
+  `matched_no_outcomes: []`; unmatched descriptions are player props and
+  player/team TD markets.
+- Ledger stance per user decision: honest flat-1u model ledger (locked plan
+  continues); webhooks left as-is until sportsedge.
+
 ### 2026-09-07 — production moved Windows → Azure VM (systemd timers)
 
 Windows (Task Scheduler `nfl_props_daily`/`nfl_props_grade`, S4U

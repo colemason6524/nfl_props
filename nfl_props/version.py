@@ -6,5 +6,5 @@ extra fields were recorded, not that recommendations changed.
 """
 
 HISTORY_SCHEMA_VERSION = 3
-MODEL_VERSION = "nfl-epa-points-v1"
-TIER_POLICY_VERSION = "core-lean-watch-v1"
+MODEL_VERSION = "nfl-epa-points-v1.1"
+TIER_POLICY_VERSION = "core-lean-watch-v2"

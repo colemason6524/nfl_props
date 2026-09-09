@@ -6,7 +6,10 @@ sits in [EV_MIN, EV_MAX] — oversized EV is forced to Watch (stale/outlier
 filter validated by the backtest: the 15%+ band was heavily negative).
 Core additionally requires both teams to have a real current-season sample;
 early-season plays cap at Lean because ratings lean on the prior-season
-prior.
+prior. Board-level single-side rule (see board.apply_single_side): only the
+highest-EV side of each (game, market) family can be Core/Lean; the opposite
+side is flagged OPPOSITE_SIDE and held in Watch so the ledger never grades
+both sides of the same line.
 """
 from __future__ import annotations
 

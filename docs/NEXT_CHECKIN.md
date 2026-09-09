@@ -23,8 +23,10 @@ Production migrated 2026-09-07/08 and **verified live**: Windows retired
 were triggered manually under systemd and returned exit 0; grading over the
 migrated 35-snapshot history reports `graded 0 | pending 18 | unmatched 0`.
 The interim tmux scheduler experiment (bash while-loops in tmux) was
-removed. First scheduled grade fires TODAY Tue Sep 8 09:00 ET; Week 1
-kicks off ~Sep 9–10.
+removed. Tue Sep 8 grade fired on schedule; Week 1 kicks off ~Sep 9–10.
+Single-side policy live (tier v2): one Core/Lean side per (game, market),
+`OPPOSITE_SIDE` → Watch. Team totals verified: 32/32 parsed, unmatched
+descriptions are player props. Model v1.1 (carryover export included).
 
 ## 2. Next action — WHEN: Tue Sep 8 09:00 ET (first `nfl-props-grade` timer run)
 - Verify the grade service runs clean under systemd: `journalctl -u
@@ -43,14 +45,15 @@ kicks off ~Sep 9–10.
 - Latest `outputs/history/nfl_board_*.json` is same-day (VM), and the Mac's
   canonical copy stays within a few days if you want the bulk mirror.
 - Board summary: Core=0 is expected pre-week-1; confirm Lean/Watch counts stay
-  sane; `tt=0` before team totals post is coverage, not failure.
+  sane; team totals are posted and parsed (`team_totals_found` ≈ 32).
 - `logs/nfl_board.log` / `logs/nfl_grade.log` on the VM end with `exit=0` /
   `grade_exit=0 refresh_exit=0`.
 - v2 shadow columns (`mu_*_v2`) present in history projections — shadow is
   collecting, not driving.
 
 ## 4. Do NOT
-- No threshold/tier-policy flips in this pass; go-live is flat 1u only.
+- No EV-window/threshold churn; go-live stays honest flat 1u on the locked
+  plan (single-side policy v2 is the only gate change, adopted pre-data).
 - No retune before Week-1 grades accumulate (≥50–100 resolved plays before
   any churn discussion).
 - No `git add .`; no provider/model swaps (stay on current model, no

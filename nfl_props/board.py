@@ -54,6 +54,35 @@ def _candidate(game: LiveGame, market: str, side: str, line: Optional[float],
     return c
 
 
+def _family_key(c: Candidate) -> tuple:
+    if c.market == "TEAM_TOTAL":
+        team = c.side.split(" ", 1)[0]
+        return (c.away, c.home, c.market, team)
+    return (c.away, c.home, c.market, "")
+
+
+def apply_single_side(candidates: List[Candidate]) -> None:
+    """One side per market family: only the max-EV side stays tier-eligible.
+
+    Both sides are still exported to history (full research context), but
+    only the highest-EV side of each (game, market) family can be Core/Lean.
+    Every other side is flagged OPPOSITE_SIDE and forced to Watch, so the
+    ledger never grades both sides of the same line (cf. cfb_props
+    decision-policy-v2). Deterministic on EV ties via side label.
+    """
+    best: Dict[tuple, Candidate] = {}
+    for c in candidates:
+        key = _family_key(c)
+        prev = best.get(key)
+        if prev is None or (c.ev, c.side) > (prev.ev, prev.side):
+            best[key] = c
+    for c in candidates:
+        if best[_family_key(c)] is not c:
+            if "OPPOSITE_SIDE" not in c.flags:
+                c.flags.append("OPPOSITE_SIDE")
+            c.tier = "Watch"
+
+
 def screen_games(games: List[LiveGame], state: dict
                  ) -> Tuple[List[Candidate], dict]:
     rp = np.array(state["resid_points"])
@@ -135,6 +164,8 @@ def screen_games(games: List[LiveGame], state: dict
                     game, "TEAM_TOTAL", f"{team} {direction}", tt.line,
                     am, dec, p, cal(p, "team_total"), k, probs["p_push"],
                     mu_h, mu_a, games_min, flags))
+
+    apply_single_side(candidates)
 
     candidates.sort(key=lambda c: ({"Core": 0, "Lean": 1, "Watch": 2}[c.tier],
                                    -c.ev))
