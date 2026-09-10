@@ -13,6 +13,16 @@ Watch=143) and wrote history; grade run reported
 and rebuilt v1+v2 state at `pbp_match_rate=1.0000`. The old tmux scheduler
 experiment was removed at the same time.
 
+**2026-09-09: system timers retired in favor of the user's `sports-*` fleet.**
+The VM already runs a consolidated user-level scheduler covering all sports
+(`sports-nfl-board` daily 10:56 ET, `sports-nfl-grade` Tue 08:47 ET — same
+runner, same repo/history/logs), so the system-level `nfl-props-*` pair was
+disabled to end duplicate runs (audit infra fix). The unit files remain in
+`scripts/systemd/` as a documented fallback; if the fleet ever goes away,
+`sudo systemctl enable --now nfl-props-board.timer nfl-props-grade.timer`
+restores them. Note the fleet timers use `Persistent=false`, so a missed
+fire time does not replay after downtime.
+
 | Item | Value |
 |---|---|
 | Host | Azure VM, Ubuntu 22.04, 2 vCPU, ~1 GB RAM, disk UTC timezone |
