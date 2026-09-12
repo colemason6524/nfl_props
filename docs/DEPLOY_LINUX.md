@@ -29,7 +29,7 @@ fire time does not replay after downtime.
 | SSH from Mac | `ssh -i ~/Downloads/RunThemScripts_key.pem azureuser@130.131.0.6` |
 | Repo | `~/nfl_props` (git@github.com:colemason6524/nfl_props.git) |
 | Python | system 3.10; venv at `.venv` |
-| Schedule | forecast board Thu 17:00 / Sun 09:00 / Sun 16:00 / Mon 18:00 America/New_York; grade+rebuild Tue 09:00 |
+| Schedule | forecast board Thu 17:00 / Sun 11:00 / Sun 16:00 / Mon 18:00 America/New_York; grade+rebuild Tue 09:00 |
 | Config | `~/.config/nfl_props/env` (TZ, NFL_SEND_DISCORD, NFL_DISCORD_WEBHOOK_URL) |
 | Logs | `~/nfl_props/logs/nfl_forecast.log`, `logs/nfl_grade.log` + `journalctl` |
 | Lock | `~/.local/state/nfl_props/run.lock` (flock — board/grade never overlap) |

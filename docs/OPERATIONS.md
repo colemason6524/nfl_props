@@ -5,7 +5,7 @@
 | When (America/New_York) | What | Runs on |
 |---|---|---|
 | Thu 17:00 | Forecast Thursday games | `nfl-props-board` timer |
-| Sun 09:00 | Forecast Sunday early slate | `nfl-props-board` timer |
+| Sun 11:00 | Forecast Sunday early slate | `nfl-props-board` timer |
 | Sun 16:00 | Forecast remaining Sunday evening slate | `nfl-props-board` timer |
 | Mon 18:00 | Forecast Monday game | `nfl-props-board` timer |
 | Tue 09:00 | Grade forecasts, refresh data, rebuild v1+v2+forecast state | `nfl-props-grade` timer |
