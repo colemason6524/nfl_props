@@ -85,6 +85,18 @@ def _bovada(ml=(1.9, 1.9), spread_line=-3.0, spread=(1.9, 1.9),
         game_total=TwoWayPrice(total_line, 0, 0, total[0], total[1]))
 
 
+def _poly(spread_line=-3.5, total_line=45.0, spread=(1.9, 1.95),
+          total=(1.9, 1.95)):
+    return {
+        "away": "AWY", "home": "HOM",
+        "moneyline": [],
+        "spread": {"line": spread_line, "home_decimal": spread[0],
+                   "away_decimal": spread[1]},
+        "total": {"line": total_line, "over_decimal": total[0],
+                  "under_decimal": total[1], "over_p": 0.5},
+    }
+
+
 class TestPriceIndependence(unittest.TestCase):
     def setUp(self):
         self.state = _fake_state()
@@ -125,6 +137,50 @@ class TestPriceIndependence(unittest.TestCase):
         ref = {r.family: r for r in fc.references}
         self.assertEqual(ref["moneyline"].source, "bovada")
         self.assertEqual(ref["moneyline"].status, PLAYABLE)
+
+
+class TestWholeLineFallback(unittest.TestCase):
+    def setUp(self):
+        self.state = _fake_state()
+
+    def _refs(self, bovada_game, poly):
+        fc = build_game_forecast(_game(), self.state, bovada_game=bovada_game,
+                                 poly=poly)
+        return {r.family: r for r in fc.references}
+
+    def test_whole_bovada_falls_back_to_half_poly(self):
+        ref = self._refs(_bovada(spread_line=-3.0, total_line=48.0),
+                         _poly(spread_line=-3.5, total_line=47.5))
+        self.assertEqual(abs(ref["spread"].line), 3.5)
+        self.assertEqual(ref["spread"].source, "polymarket")
+        self.assertEqual(ref["spread"].sources, ["polymarket"])
+        self.assertEqual(ref["total"].line, 47.5)
+        self.assertEqual(ref["total"].source, "polymarket")
+
+    def test_half_bovada_stays_primary(self):
+        ref = self._refs(_bovada(spread_line=-3.5, total_line=45.5),
+                         _poly(spread_line=-3.0, total_line=48.0))
+        self.assertEqual(abs(ref["spread"].line), 3.5)
+        self.assertEqual(ref["spread"].source, "bovada")
+        self.assertEqual(ref["total"].line, 45.5)
+        self.assertEqual(ref["total"].source, "bovada")
+
+    def test_whole_bovada_without_half_poly_keeps_bovada(self):
+        ref = self._refs(_bovada(spread_line=-3.0, total_line=48.0),
+                         _poly(spread_line=-3.0, total_line=48.0))
+        self.assertEqual(abs(ref["spread"].line), 3.0)
+        self.assertEqual(ref["spread"].source, "bovada")
+        self.assertEqual(ref["total"].line, 48.0)
+        self.assertEqual(ref["total"].source, "bovada")
+
+    def test_fallback_uses_matching_source_price(self):
+        ref = self._refs(
+            _bovada(spread_line=-3.0, total_line=48.0,
+                    spread=(1.01, 25.0), total=(1.01, 25.0)),
+            _poly(spread_line=-3.5, total_line=47.5,
+                  spread=(1.90, 1.95), total=(1.90, 1.95)))
+        self.assertIn(ref["spread"].decimal, (1.90, 1.95))
+        self.assertIn(ref["total"].decimal, (1.90, 1.95))
 
 
 class TestReferences(unittest.TestCase):

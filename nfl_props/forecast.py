@@ -107,9 +107,9 @@ def _poly_side(poly: Optional[dict], family: str, side: str,
 
 
 def _prices(family: str, side: str, opp: str, bovada_game,
-            poly: Optional[dict]) -> List[tuple]:
+            poly: Optional[dict], include_bovada: bool = True) -> List[tuple]:
     prices: List[tuple] = []
-    if bovada_game is not None:
+    if include_bovada and bovada_game is not None:
         market = (bovada_game.moneyline if family == "moneyline"
                   else bovada_game.spread if family == "spread"
                   else bovada_game.game_total)
@@ -127,22 +127,39 @@ def _prices(family: str, side: str, opp: str, bovada_game,
     return prices
 
 
-def _resolve_spread_line(bovada_game, poly: Optional[dict]) -> Optional[float]:
-    if bovada_game is not None and bovada_game.spread is not None:
-        if bovada_game.spread.line is not None:
-            return float(bovada_game.spread.line)
-    if poly and poly.get("spread") and poly["spread"].get("line") is not None:
-        return float(poly["spread"]["line"])
+def _is_whole_line(line: Optional[float]) -> bool:
+    return line is not None and float(line).is_integer()
+
+
+def _poly_line(poly: Optional[dict], family: str) -> Optional[float]:
+    if not poly:
+        return None
+    market = poly.get(family)
+    if market and market.get("line") is not None:
+        return float(market["line"])
     return None
 
 
-def _resolve_total_line(bovada_game, poly: Optional[dict]) -> Optional[float]:
-    if (bovada_game is not None and bovada_game.game_total is not None
-            and bovada_game.game_total.line is not None):
-        return float(bovada_game.game_total.line)
-    if poly and poly.get("total") and poly["total"].get("line") is not None:
-        return float(poly["total"]["line"])
-    return None
+def _resolve_line(bovada_game, poly: Optional[dict], family: str
+                  ) -> tuple[Optional[float], Optional[str]]:
+    """Resolve (line, source); fall back to a half-point Polymarket line when
+    Bovada posts a whole number. The line and its prices must share a source."""
+    line = None
+    if bovada_game is not None:
+        market = (bovada_game.spread if family == "spread"
+                  else bovada_game.game_total)
+        if market is not None and market.line is not None:
+            line = float(market.line)
+    if line is None:
+        poly_line = _poly_line(poly, family)
+        if poly_line is not None:
+            return poly_line, POLYMARKET
+        return None, None
+    if _is_whole_line(line):
+        poly_line = _poly_line(poly, family)
+        if poly_line is not None and not _is_whole_line(poly_line):
+            return poly_line, POLYMARKET
+    return line, BOVADA
 
 
 def build_game_forecast(game: dict, state: dict,
@@ -214,7 +231,7 @@ def build_game_forecast(game: dict, state: dict,
         _prices("moneyline", winner_pick, ml_opp, bovada_game, poly)))
 
     # Spread: posted line defines the proposition; projection picks the side.
-    spread_line = _resolve_spread_line(bovada_game, poly)
+    spread_line, spread_src = _resolve_line(bovada_game, poly, "spread")
     if spread_line is not None:
         probs = spread_probs(proj["mu_margin"], rm, home_spread=spread_line)
         if proj["mu_margin"] + spread_line > 0:
@@ -227,13 +244,14 @@ def build_game_forecast(game: dict, state: dict,
             opp = "home"
         fc.references.append(build_reference(
             "spread", side, side_line, p_model, probs["p_push"],
-            _prices("spread", side, opp, bovada_game, poly)))
+            _prices("spread", side, opp, bovada_game, poly,
+                    include_bovada=(spread_src == BOVADA))))
     else:
         fc.references.append(build_reference(
             "spread", None, None, None, 0.0, [], note="no posted line"))
 
     # Total: posted number defines the proposition; projection picks the side.
-    total_line = _resolve_total_line(bovada_game, poly)
+    total_line, total_src = _resolve_line(bovada_game, poly, "total")
     if total_line is not None:
         probs = game_total_probs(proj["mu_total"], rt, total_line)
         if proj["mu_total"] > total_line:
@@ -242,7 +260,8 @@ def build_game_forecast(game: dict, state: dict,
             side, p_model, opp = "under", probs["p_under"], "over"
         fc.references.append(build_reference(
             "total", side, total_line, p_model, probs["p_push"],
-            _prices("total", side, opp, bovada_game, poly)))
+            _prices("total", side, opp, bovada_game, poly,
+                    include_bovada=(total_src == BOVADA))))
     else:
         fc.references.append(build_reference(
             "total", None, None, None, 0.0, [], note="no posted line"))
