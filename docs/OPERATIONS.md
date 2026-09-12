@@ -1,17 +1,26 @@
 # Operations
 
-## Weekly rhythm (in season)
+## Weekly rhythm (in season) — forecast-first
 
-| When (America/Detroit) | What | Runs on |
+| When (America/New_York) | What | Runs on |
 |---|---|---|
-| Daily 11:00 | Live board (lines move all week) | Azure VM systemd timer `nfl-props-board` |
-| Tue 09:00 | Grade finished week, refresh data, rebuild v1+v2 state | Azure VM systemd timer `nfl-props-grade` |
+| Thu 17:00 | Forecast Thursday games | `nfl-props-board` timer |
+| Sun 09:00 | Forecast Sunday early slate | `nfl-props-board` timer |
+| Sun 16:00 | Forecast remaining Sunday evening slate | `nfl-props-board` timer |
+| Mon 18:00 | Forecast Monday game | `nfl-props-board` timer |
+| Tue 09:00 | Grade forecasts, refresh data, rebuild v1+v2+forecast state | `nfl-props-grade` timer |
 
-On the VM these call `scripts/run_nfl_linux_task.sh {board|grade}`; the grade
-task chains `grade.py` → `refresh-data` → `build` → `rebuild-state` →
-`rebuild-state-v2`. Manual equivalents on any host: `run_board.py` /
-`grade.py` + the cli chain. Team totals usually appear on Bovada during game
-week; earlier runs log `team_totals_found=0` — that is coverage, not failure.
+Each run publishes only the current ET day's not-yet-started games, in three
+Discord sections (Moneylines / Spreads / Totals), with no truncation. On the VM
+these call `scripts/run_nfl_linux_task.sh {board|grade}`; the board task runs
+`run_forecast_board.py --rebuild-state --discord`, and the grade task chains
+`grade_forecast.py` → `refresh-data` → `build` → `rebuild-state` →
+`rebuild-state-v2` → `rebuild-forecast-state`. Manual equivalents on any host:
+`run_forecast_board.py` / `grade_forecast.py`. Unpriced games still publish —
+that is coverage, not failure.
+
+The legacy price-screened board (`run_board.py`, `grade.py`) is retired
+operationally and kept only for historical cohort grading.
 
 ## Linux production (Azure VM) — current
 
@@ -56,22 +65,28 @@ retirement. History/logs were migrated to the Mac before shutdown.
 ## Mac dev equivalents
 
 ```bash
-.venv/bin/python run_board.py                # board
-.venv/bin/python grade.py                    # grade + games.csv refresh
+.venv/bin/python run_forecast_board.py          # current-day forecast board
+.venv/bin/python run_forecast_board.py --date 2026-09-13 --discord
+.venv/bin/python grade_forecast.py              # accuracy + reference ROI
 .venv/bin/python -m nfl_props.cli refresh-data && \
   .venv/bin/python -m nfl_props.cli build && \
-  .venv/bin/python -m nfl_props.cli rebuild-state   # weekly rebuild
-.venv/bin/python backtest.py                 # full historical backtest
+  .venv/bin/python -m nfl_props.cli rebuild-forecast-state   # weekly rebuild
+.venv/bin/python backtest_forecast.py           # leak-free tune/holdout
 .venv/bin/python -m nfl_props.cli rebuild-state-v2  # v2 shadow state (research)
-.venv/bin/python backtest_v2.py              # v2 feature-set ablation
-.venv/bin/python -m unittest discover -s tests   # unit tests
+.venv/bin/python -m nfl_props.cli backfill-weather  # optional weather store
+.venv/bin/python backtest_v2.py                 # v2 feature-set ablation
+.venv/bin/python -m unittest discover -s tests  # unit tests
 ```
 
-The v2 shadow model (`ratings/v2.py`, `backtest_v2.py`,
-`rebuild-state-v2`) is research-only: it never changes v1 probabilities or
-tiers. Its ablation backtest is flat vs the market (see `docs/PLAN.md`), so it
-is kept as a graded-shadow pipeline, not promoted. `run_board.py` attaches v2
-shadow projections to history when `live_state_v2_shadow.json` exists.
+The forecast-first lane (`nfl_props/forecast.py`, `forecasting.py`,
+`forecast_board.py`, `run_forecast_board.py`, `grade_forecast.py`,
+`backtest_forecast.py`) is the production product; see
+[`PRODUCT_CONTRACT.md`](PRODUCT_CONTRACT.md). The legacy v1 board
+(`run_board.py`, Core/Lean/Watch) is retired operationally; v1/v2 state rebuilds
+remain for historical grading. Weather columns enter the total head only when
+`data/processed/game_weather.parquet` exists (`cli backfill-weather`); until
+then they are neutral and dropped from the fit.
+
 `grade.py` selects the latest pre-kickoff v1/v2 projection for every regular-
 season game and reports points, margin, and total MAE side by side. Negative
 `v2-v1` deltas mean v2 was better. Resolved shadow rows are exported separately

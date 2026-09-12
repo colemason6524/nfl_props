@@ -1,64 +1,59 @@
 # nfl_props
 
-NFL **team-market** research engine: team total points O/U, game spread, and
-moneyline.
+NFL **forecast-first** board: the model publishes an independent opinion for
+every scheduled game on the current day — **moneyline, spread, total** — before
+looking at a sportsbook. Bovada (primary) and Polymarket (fallback) lines and
+prices are attached afterwards only to describe value (`PLAYABLE` / `NO_VALUE` /
+`UNPRICED`). The model decides the pick; the price determines the action.
 
-Builds opponent-adjusted EPA team ratings from free nflverse data, projects
-team points, compares fair probabilities to Bovada prices, and surfaces
-positive-EV plays as Core / Lean / Watch. Flat 1-unit stakes. No paid API keys.
+The authoritative product rules live in [`docs/PRODUCT_CONTRACT.md`](docs/PRODUCT_CONTRACT.md).
 
-Lessons carried from `tennis_props`, `wnba_props`, `mlb_props`, and
-`golf_props` (see `tennis_props/docs/PLAYBOOK.md`): scrape-first free data,
-point-in-time features, export-everything history, grade snapshots instead of
-auto-retraining, and keep the performance model separate from the odds/value
-layer.
+## What it does
 
-## Status (2026-08-13)
+- Replays opponent-adjusted, play-based EPA (overall + pass/rush) and pace from
+  free nflverse data, point-in-time.
+- Fits **three separate price-free models** each owning its own target:
+  - `winner` — logistic P(home win) → moneyline pick
+  - `margin` — ridge OLS on (home − away) → spread side
+  - `total` — ridge OLS on (home + away) → over/under side
+- Adds schedule context (rest, dome, neutral, division), lagged quarterback
+  quality, and point-in-time head-to-head history. Weather is plumbed through
+  the total head (neutral until the weather store is populated).
+- Creates a weekly NFL-universe forecast even when a game is unpriced; internal
+  disagreement between the three heads is shown, not hidden.
+- Grades forecast accuracy (winner accuracy, Brier, log loss, margin/total MAE)
+  separately from flat-1u reference ROI at captured prices.
+- Continues into the postseason.
+
+## Status (2026-09-12)
 
 | Phase | Status |
 |---|---|
-| 0 Locked decisions | **done** |
-| 1 Data foundation (nflverse ingest, canonical store) | **done** |
-| 2 Baseline model + backtest vs closing | **done** |
-| 3 Live Bovada board + tiers + history export | **done** |
-| 4 Grading (`grade.py`) | **done** |
-| 5 Windows Task Scheduler ops | **scripts ready; schedule at Week 1** |
-| Preseason dry-run window (Aug 2026) | **in progress — ungraded pipeline checks only** |
-| Discord delivery | **stubbed, default off** |
-| FanDuel scraper | **deferred** |
+| Legacy price-screened board (`run_board.py`, Core/Lean/Watch) | **retired operationally** (historical grading only) |
+| Forecast-first models (`nfl-forecast-v1`) | **done** |
+| Current-day schedule board + Bovada/Polymarket references | **done** |
+| Discord three-section board (no truncation) | **done** |
+| Forecast grading + ROI (`grade_forecast.py`) | **done** |
+| Forecast backtest (`backtest_forecast.py`) | **done** |
+| Weather store populated | **pending** (neutral until backfilled) |
+| Personnel / injury feed | **deferred** (fail-open scaffold) |
+| Player props | **deferred** |
 
-Roadmap and findings log: [`docs/PLAN.md`](docs/PLAN.md).
-Day-to-day ops: [`docs/OPERATIONS.md`](docs/OPERATIONS.md).
-Module map: [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md).
-**Handoff / current state (read first in a new chat):** [`docs/HANDOFF.md`](docs/HANDOFF.md).
-**Paste-ready agent prompt:** [`docs/AGENT_INTRO_PROMPT.md`](docs/AGENT_INTRO_PROMPT.md).
-**Windows deploy walkthrough:** [`docs/DEPLOY_WINDOWS.md`](docs/DEPLOY_WINDOWS.md).
-
-## Design decisions (locked)
-
-| Decision | Choice |
-|---|---|
-| Markets v1 | Team total points O/U + game spread + moneyline |
-| Games | Regular season 2026+; preseason = ungraded pipeline dry-run only |
-| Live odds | Bovada free JSON coupon API (primary). FanDuel is the book actually bet; FD scrape deferred |
-| Historical stats | nflverse play-by-play parquet releases (EPA per play) |
-| Historical odds | nflverse/nfldata `games.csv` closing spread/total/moneylines (Lee Sharpe) |
-| Historical team-total lines | **Not published free** — derived implied team totals `(total ∓ spread)/2`; see honesty note |
-| Staking | Flat 1 unit, no Kelly |
-| Scheduling | Windows Task Scheduler production; macOS for dev/review |
-| Pushes / cancelled games | Pushes are a wash; grade only completed games |
-
-## Pipeline (as built)
+## Pipeline (forecast-first)
 
 ```
-refresh-data  ->  data/raw/play_by_play_*.parquet + games.csv
-build         ->  data/processed/team_games.parquet + games.parquet
-rebuild-state ->  data/processed/live_state.json  (ratings + coefficients + residuals)
-run_board     ->  Bovada slate/odds -> fair p -> EV -> Core/Lean/Watch
-              ->  terminal board + outputs/history/nfl_board_*.json
-              ->  optional Discord Core digest (default off)
-grade         ->  latest pre-kickoff Core/Lean vs final scores -> outputs/backtests/
+refresh-data           ->  data/raw/play_by_play_*.parquet + games.csv
+build                  ->  data/processed/{games,team_games,team_situational_games,qb_games}.parquet
+rebuild-forecast-state ->  data/processed/forecast_state.json  (winner/margin/total)
+run_forecast_board     ->  today's schedule -> price-free forecasts
+                       ->  Bovada + Polymarket references -> consensus edge/EV
+                       ->  terminal board + outputs/forecast_history/nfl_forecast_*.json
+grade_forecast         ->  latest pre-kickoff forecast vs final scores + reference ROI
+backtest_forecast      ->  leak-free tune/holdout forecast validation
 ```
+
+Legacy artifacts remain in `outputs/history/` and are graded by `grade.py`;
+they are never pooled with the forecast cohort.
 
 ## Quick start
 
@@ -67,59 +62,47 @@ cd /path/to/nfl_props
 python3 -m venv .venv
 .venv/bin/pip install -r requirements.txt
 
-# Weekly (Tuesday, after MNF): refresh raw data and rebuild
+# One-time / weekly data + model rebuild
 .venv/bin/python -m nfl_props.cli refresh-data
 .venv/bin/python -m nfl_props.cli build
-.venv/bin/python -m nfl_props.cli rebuild-state
+.venv/bin/python -m nfl_props.cli rebuild-forecast-state
 
-# Historical backtest (tune 2015-2022, holdout 2023-2025)
-.venv/bin/python backtest.py
+# Forecast board for the current day (add --discord to post)
+.venv/bin/python run_forecast_board.py
+.venv/bin/python run_forecast_board.py --date 2026-09-13   # override ET day
 
-# Live board (in season: run daily Tue-Sun; lines move all week)
-.venv/bin/python run_board.py
-
-# After games finish (and refresh-data): grade Core/Lean
-.venv/bin/python grade.py
+# Grade + historical validation
+.venv/bin/python grade_forecast.py
+.venv/bin/python backtest_forecast.py
 ```
 
-### Windows production
+Run schedule (America/New_York): Thursday evening (TNF), Sunday morning (early
+slate), Sunday afternoon (remaining evening slate), Monday evening (MNF). Each
+run publishes only the current day's not-yet-started games.
 
-1. Clone the repo to the desktop (e.g. `C:\Users\muski\nfl_props`).
-2. Create `.venv`, install `requirements.txt`.
-3. Optional: set user env `NFL_DISCORD_WEBHOOK_URL` and `NFL_SEND_DISCORD=true`.
-4. Task Scheduler → daily → `scripts\run_nfl_board_task.cmd`.
-5. Tuesday morning task → `scripts\run_nfl_grade_task.cmd` (grades + refreshes data + rebuilds state).
+## Action labels (current defaults)
 
-Logs: `logs\nfl_board.log`, `logs\nfl_grade.log`. See `docs/OPERATIONS.md`
-and the full SSH/clone/smoke-test walkthrough in `docs/DEPLOY_WINDOWS.md`.
+The model pick is fixed before pricing. The reference price only describes
+whether the model's side has positive expected value.
 
-## Live tiers (current defaults)
-
-Fair probability = EPA points projection + empirical score distributions
-(**market not inside fair**). EV = flat 1u at the offered Bovada price.
-Edge = `p_model − p_market` (de-vigged book).
-
-| Tier | Rule |
+| Label | Rule |
 |---|---|
-| **Core** | EV in [2%, 8%], edge ≥ 2%, both teams ≥ 3 current-season games |
-| **Lean** | EV in [2%, 8%], edge ≥ 2% (early-season / lower-confidence) |
-| **Watch** | Everything else with interest; EV > 8% stays Watch (stale/outlier filter) |
+| `PLAYABLE` | model EV at the reference price ≥ `NFL_VALUE_PLAYABLE` (default 0%) |
+| `NO_VALUE` | a price exists but EV is below the threshold |
+| `UNPRICED` | no usable reference price captured |
 
-Env overrides: `NFL_EV_MIN`, `NFL_EV_MAX`, `NFL_EDGE_MIN`, `NFL_CORE_EV_MIN`,
-`NFL_MIN_TEAM_GAMES`.
-
-Discord posts **Core only** and stays off unless `NFL_SEND_DISCORD=true` and
-`NFL_DISCORD_WEBHOOK_URL` are set (sport-specific webhook, never shared).
+Numeric model probability, consensus market probability, edge, and EV are
+always shown. Env override: `NFL_VALUE_PLAYABLE`.
 
 ## Important honesty notes
 
-- **NFL closing spreads/totals are the most efficient lines in sports.**
-  Expect parity at best against closing in backtests. The live thesis is
-  model-vs-Bovada disagreement in a capped EV window (team totals are softer
-  than spreads), graded prospectively — treat early live ROI as research.
-- **Historical team-total lines are derived, not real.** Free archives carry
-  closing spread + total only, so the backtest prices team totals at the
-  implied line `(total ∓ spread)/2` with assumed -110 juice. That validates
-  the points model and calibration, not realized team-total ROI.
-- Backtest results and EV-band findings are logged in `docs/PLAN.md` as they
-  accumulate. Do not retune from fewer than ~50-100 graded Core/Lean plays.
+- **NFL closing spreads/totals are the most efficient lines in sports.** The
+  forecast-first shift improves decision integrity and coverage; it is not a
+  claim that the model beats the market. Backtest holdout (2023–2025) is
+  logged in `outputs/forecast_backtests/`.
+- The model's pick is never flipped by a price, and the opposite side is never
+  promoted because it looks like "value."
+- NFL ties settle as pushes (stake returned), never losses.
+- Early-season forecasts lean on last season's play-based ratings (60%
+  carryover). Week 1's snapshot is an evaluation sample, not a tuning trigger.
+- Do not retune thresholds from a handful of graded games; log findings first.

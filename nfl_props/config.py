@@ -11,6 +11,11 @@ HISTORY_DIR = OUTPUTS_DIR / "history"
 BACKTESTS_DIR = OUTPUTS_DIR / "backtests"
 DIAGNOSTICS_DIR = OUTPUTS_DIR / "diagnostics"
 CONFIG_DIR = PROJECT_ROOT / "config"
+# Forecast-first cohort artifacts are deliberately separate from the legacy
+# price-screened history so the two grading cohorts are never pooled.
+FORECAST_HISTORY_DIR = OUTPUTS_DIR / "forecast_history"
+FORECAST_BACKTESTS_DIR = OUTPUTS_DIR / "forecast_backtests"
+LEDGER_DIR = OUTPUTS_DIR / "ledger"
 
 # Historical coverage. pbp EPA is reliable from 1999+, but ratings only use
 # the modern era to avoid rule-era drift.
@@ -28,6 +33,13 @@ NFLVERSE_PBP_URL = (
 )
 NFLVERSE_GAMES_URL = "https://github.com/nflverse/nfldata/raw/master/data/games.csv"
 
+# Polymarket secondary reference source (free Gamma API, no key, best-effort).
+POLYMARKET_GAMMA_BASE = os.environ.get(
+    "NFL_POLYMARKET_GAMMA_BASE", "https://gamma-api.polymarket.com")
+
+# Forecast board digest timezone (games/schedule filtering; ET is NFL standard).
+FORECAST_TZ = os.environ.get("NFL_FORECAST_TZ", "America/New_York")
+
 HTTP_TIMEOUT_SECONDS = 60
 HTTP_USER_AGENT = (
     "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 "
@@ -37,5 +49,6 @@ HTTP_USER_AGENT = (
 
 def ensure_dirs() -> None:
     for d in (RAW_DIR, PROCESSED_DIR, CACHE_DIR, HISTORY_DIR, BACKTESTS_DIR,
-              DIAGNOSTICS_DIR, CONFIG_DIR):
+              DIAGNOSTICS_DIR, CONFIG_DIR, FORECAST_HISTORY_DIR,
+              FORECAST_BACKTESTS_DIR, LEDGER_DIR):
         d.mkdir(parents=True, exist_ok=True)

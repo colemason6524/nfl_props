@@ -22,6 +22,15 @@ def main(argv=None) -> int:
                    help="replay ratings and write live_state.json")
     sub.add_parser("rebuild-state-v2",
                    help="replay v2 shadow ratings and write live_state_v2_shadow.json")
+    sub.add_parser("rebuild-forecast-state",
+                   help="fit winner/margin/total forecast models (forecast-first)")
+    p_wx = sub.add_parser("backfill-weather",
+                          help="backfill historical game-time weather (Open-Meteo)")
+    p_wx.add_argument("--seasons", type=int, nargs="*", default=None)
+    p_wx.add_argument("--limit", type=int, default=None,
+                      help="cap archive API requests (team-seasons; sample run)")
+    p_wx.add_argument("--refresh", action="store_true",
+                      help="re-fetch even when a raw cache file exists")
 
     args = ap.parse_args(argv)
     config.ensure_dirs()
@@ -42,6 +51,17 @@ def main(argv=None) -> int:
         shadow = rebuild_state_v2()
         log(f"[cli] v2 shadow state written (as_of={shadow['as_of']}, "
             f"{len(shadow['teams'])} teams, {len(shadow['qbs'])} qbs)")
+    elif args.command == "rebuild-forecast-state":
+        from .forecasting import rebuild_forecast_state
+        state = rebuild_forecast_state()
+        log(f"[cli] forecast state written (as_of={state['as_of']}, "
+            f"feature_set={state['feature_set']}, "
+            f"{state['n_paired_games']} fit games)")
+    elif args.command == "backfill-weather":
+        from .sources.weather import backfill_weather
+        df = backfill_weather(seasons=args.seasons, limit=args.limit,
+                              refresh=args.refresh)
+        log(f"[cli] weather rows: {len(df)}")
     return 0
 
 

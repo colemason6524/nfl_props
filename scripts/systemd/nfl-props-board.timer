@@ -1,8 +1,11 @@
 [Unit]
-Description=nfl_props daily board at 11:00 America/Detroit
+Description=nfl_props forecast-first board (Thu/Sun early/Sun late/Mon, ET)
 
 [Timer]
-OnCalendar=*-*-* 11:00:00 America/Detroit
+OnCalendar=Thu *-*-* 17:00:00 America/Detroit
+OnCalendar=Sun *-*-* 09:00:00 America/Detroit
+OnCalendar=Sun *-*-* 16:00:00 America/Detroit
+OnCalendar=Mon *-*-* 18:00:00 America/Detroit
 Persistent=true
 Unit=nfl-props-board.service
 

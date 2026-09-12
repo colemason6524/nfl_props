@@ -1,5 +1,5 @@
 [Unit]
-Description=nfl_props weekly grade + v1/v2 rebuild (Tuesday morning)
+Description=nfl_props forecast grade + weekly v1/v2/forecast rebuild (Tuesday)
 Wants=network-online.target
 After=network-online.target
 

@@ -27,16 +27,16 @@ fi
 
 case "$TASK" in
     board)
-        LOG_FILE="$LOG_DIR/nfl_board.log"
+        LOG_FILE="$LOG_DIR/nfl_forecast.log"
         TIMEOUT=45m
-        COMMAND=("$PYTHON_EXE" run_board.py --discord)
+        COMMAND=("$PYTHON_EXE" run_forecast_board.py --rebuild-state --discord)
         REQUIRED_SECRET=NFL_DISCORD_WEBHOOK_URL
         ;;
     grade)
         LOG_FILE="$LOG_DIR/nfl_grade.log"
         TIMEOUT=90m
-        # Refresh the new week even when there are no completed games to grade.
-        COMMAND=(bash -c 'grade_exit=0; "$1" grade.py || grade_exit=$?; "$1" -m nfl_props.cli refresh-data && "$1" -m nfl_props.cli build && "$1" -m nfl_props.cli rebuild-state && "$1" -m nfl_props.cli rebuild-state-v2; refresh_exit=$?; if (( grade_exit != 0 )); then exit "$grade_exit"; fi; exit "$refresh_exit"' _ "$PYTHON_EXE")
+        # Grade forecast snapshots, then refresh the data/model for the new week.
+        COMMAND=(bash -c 'grade_exit=0; "$1" grade_forecast.py || grade_exit=$?; "$1" -m nfl_props.cli refresh-data && "$1" -m nfl_props.cli build && "$1" -m nfl_props.cli rebuild-state && "$1" -m nfl_props.cli rebuild-state-v2 && "$1" -m nfl_props.cli rebuild-forecast-state; refresh_exit=$?; if (( grade_exit != 0 )); then exit "$grade_exit"; fi; exit "$refresh_exit"' _ "$PYTHON_EXE")
         REQUIRED_SECRET=
         ;;
     *)

@@ -1,5 +1,5 @@
 [Unit]
-Description=nfl_props daily board (Bovada snapshot + Core/Lean/Watch tiers)
+Description=nfl_props forecast-first board (Bovada primary / Polymarket fallback)
 Wants=network-online.target
 After=network-online.target
 

@@ -29,10 +29,17 @@ fire time does not replay after downtime.
 | SSH from Mac | `ssh -i ~/Downloads/RunThemScripts_key.pem azureuser@130.131.0.6` |
 | Repo | `~/nfl_props` (git@github.com:colemason6524/nfl_props.git) |
 | Python | system 3.10; venv at `.venv` |
-| Schedule | board daily 11:00, grade+rebuild Tue 09:00 — both America/Detroit |
+| Schedule | forecast board Thu 17:00 / Sun 09:00 / Sun 16:00 / Mon 18:00 America/New_York; grade+rebuild Tue 09:00 |
 | Config | `~/.config/nfl_props/env` (TZ, NFL_SEND_DISCORD, NFL_DISCORD_WEBHOOK_URL) |
-| Logs | `~/nfl_props/logs/nfl_board.log`, `logs/nfl_grade.log` + `journalctl` |
+| Logs | `~/nfl_props/logs/nfl_forecast.log`, `logs/nfl_grade.log` + `journalctl` |
 | Lock | `~/.local/state/nfl_props/run.lock` (flock — board/grade never overlap) |
+
+The product is forecast-first: `run_forecast_board.py` publishes today's
+not-yet-started games in three sections (Moneylines / Spreads / Totals) and
+`grade_forecast.py` grades them. The legacy `run_board.py` / `grade.py` are
+retired operationally (historical cohort only). One-time bootstrap adds
+`rebuild-forecast-state`; optional `backfill-weather` populates the weather
+store used by the total head.
 
 ## Lightweight by design
 
