@@ -21,10 +21,11 @@ from ..pricing import decimal_to_american
 from ..teams import normalize_team
 from ..utils import log
 
-TAG_SLUGS = ("nfl", "nfl-gameday", "football")
+TAG_SLUGS = ("nfl-gameday", "nfl", "football")
 
 _TOTAL_LINE = re.compile(r"O/U\s*([0-9]+(?:\.[0-9]+)?)")
 _SPREAD_LINE = re.compile(r"([+-]?[0-9]+(?:\.[0-9]+)?)")
+_SPREAD_TEAM = re.compile(r"Spread:\s*(.+?)\s*\(", re.IGNORECASE)
 
 
 def _get(url: str) -> Optional[object]:
@@ -68,8 +69,9 @@ def _parse_event(event: dict) -> Optional[dict]:
     away, home = teams
     ml_refs: List[dict] = []
     best_total: Optional[dict] = None
-    best_gap = 1.0
+    best_total_gap = 1.0
     spread: Optional[dict] = None
+    best_spread_gap = 1.0
     for market in event.get("markets") or []:
         mtype = str(market.get("sportsMarketType") or "").lower()
         try:
@@ -98,8 +100,8 @@ def _parse_event(event: dict) -> Optional[dict]:
             if p_over is None:
                 continue
             gap = abs(p_over - 0.5)
-            if gap < best_gap and 0.0 < p_over < 1.0:
-                best_gap = gap
+            if gap < best_total_gap and 0.0 < p_over < 1.0:
+                best_total_gap = gap
                 best_total = {
                     "line": float(match.group(1)),
                     "over_decimal": round(1.0 / p_over, 4),
@@ -111,16 +113,26 @@ def _parse_event(event: dict) -> Optional[dict]:
             match = _SPREAD_LINE.search(question)
             if not match:
                 continue
-            line = float(match.group(1))
             price_by_team = {}
             for name, price in zip(outcomes, prices):
                 canon = normalize_team(name)
                 if canon:
                     price_by_team[canon] = float(price)
-            if home in price_by_team and away in price_by_team:
-                # The question names the handicapped team next to the number.
-                home_favored = home.lower() in question.lower().split(str(line))[0].lower()
-                home_line = -abs(line) if home_favored else abs(line)
+            if home not in price_by_team or away not in price_by_team:
+                continue
+            # The question names the handicapped team next to the number
+            # (e.g. "Spread: Cowboys (-2.5)"); outcomes[0] is that team too.
+            team_match = _SPREAD_TEAM.search(question)
+            handicap_team = (normalize_team(team_match.group(1))
+                             if team_match else None)
+            if handicap_team is None:
+                handicap_team = normalize_team(outcomes[0])
+            line = float(match.group(1))
+            home_line = -abs(line) if handicap_team == home else abs(line)
+            # The main line is the market closest to even money.
+            gap = abs(price_by_team[home] - 0.5)
+            if gap < best_spread_gap:
+                best_spread_gap = gap
                 spread = {
                     "line": home_line,
                     "home_decimal": round(1.0 / price_by_team[home], 4)

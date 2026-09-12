@@ -76,6 +76,19 @@ _NAME_ALIASES = {
     "washington redskins": "WAS",
 }
 
+# Standalone nicknames (Polymarket titles/outcomes) -> canonical
+_NICKNAME_ALIASES = {
+    "cardinals": "ARI", "falcons": "ATL", "ravens": "BAL", "bills": "BUF",
+    "panthers": "CAR", "bears": "CHI", "bengals": "CIN", "browns": "CLE",
+    "cowboys": "DAL", "broncos": "DEN", "lions": "DET", "packers": "GB",
+    "texans": "HOU", "colts": "IND", "jaguars": "JAX", "chiefs": "KC",
+    "rams": "LA", "chargers": "LAC", "raiders": "LV", "dolphins": "MIA",
+    "vikings": "MIN", "patriots": "NE", "saints": "NO", "giants": "NYG",
+    "jets": "NYJ", "eagles": "PHI", "steelers": "PIT", "seahawks": "SEA",
+    "49ers": "SF", "buccaneers": "TB", "titans": "TEN",
+    "commanders": "WAS",
+}
+
 _CANONICAL_SET = set(CANONICAL_TEAMS)
 
 
@@ -91,4 +104,5 @@ def normalize_team(raw: object) -> Optional[str]:
         return upper
     if upper in _ABBR_ALIASES:
         return _ABBR_ALIASES[upper]
-    return _NAME_ALIASES.get(text.lower())
+    lower = text.lower()
+    return _NAME_ALIASES.get(lower) or _NICKNAME_ALIASES.get(lower)
