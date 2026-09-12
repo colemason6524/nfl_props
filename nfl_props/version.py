@@ -16,10 +16,10 @@ MODEL_VERSION = "nfl-epa-points-v1.1"
 TIER_POLICY_VERSION = "core-lean-watch-v2"
 
 # --- Forecast-first cohort --------------------------------------------------
-FORECAST_MODEL_VERSION = "nfl-forecast-v1"
+FORECAST_MODEL_VERSION = "nfl-forecast-v1.1"
 WINNER_MODEL_VERSION = "nfl-winner-logit-v1"
 MARGIN_MODEL_VERSION = "nfl-margin-ridge-v1"
-TOTAL_MODEL_VERSION = "nfl-total-ridge-v1"
+TOTAL_MODEL_VERSION = "nfl-total-ridge-v2"
 FORECAST_HISTORY_SCHEMA_VERSION = 1
 PRODUCT_POLICY_VERSION = "nfl-forecast-first-v1"
 VALUE_POLICY_VERSION = "nfl-value-bands-v1"

@@ -30,12 +30,12 @@ The authoritative product rules live in [`docs/PRODUCT_CONTRACT.md`](docs/PRODUC
 | Phase | Status |
 |---|---|
 | Legacy price-screened board (`run_board.py`, Core/Lean/Watch) | **retired operationally** (historical grading only) |
-| Forecast-first models (`nfl-forecast-v1`) | **done** |
+| Forecast-first models (`nfl-forecast-v1.1`) | **done** |
 | Current-day schedule board + Bovada/Polymarket references | **done** |
 | Discord three-section board (no truncation) | **done** |
 | Forecast grading + ROI (`grade_forecast.py`) | **done** |
 | Forecast backtest (`backtest_forecast.py`) | **done** |
-| Weather store populated | **pending** (neutral until backfilled) |
+| Weather store populated + total head (`cli backfill-weather`) | **done** (Open-Meteo; improves total MAE) |
 | Personnel / injury feed | **deferred** (fail-open scaffold) |
 | Player props | **deferred** |
 
