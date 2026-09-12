@@ -171,10 +171,11 @@ class TestGrading(unittest.TestCase):
 class TestSelection(unittest.TestCase):
     def test_latest_pregame_and_cohort(self):
         from grade_forecast import select_latest_pregame
+        from nfl_props.version import FORECAST_MODEL_VERSION
         with tempfile.TemporaryDirectory() as tmp:
             d = Path(tmp)
             early = {
-                "model_version": "nfl-forecast-v1",
+                "model_version": FORECAST_MODEL_VERSION,
                 "generated_at_utc": "2026-09-13T10:00:00+00:00",
                 "forecasts": [{
                     "forecast_id": "g:1", "available": True,
@@ -183,7 +184,7 @@ class TestSelection(unittest.TestCase):
                 }],
             }
             late = {
-                "model_version": "nfl-forecast-v1",
+                "model_version": FORECAST_MODEL_VERSION,
                 "generated_at_utc": "2026-09-13T15:00:00+00:00",
                 "forecasts": [{
                     "forecast_id": "g:1", "available": True,
