@@ -169,15 +169,16 @@ def _weather_available(paired: pd.DataFrame) -> bool:
             and float(paired["has_weather"].fillna(0).sum()) > 0)
 
 
-def _effective_features(paired: pd.DataFrame, feature_set: str
-                        ) -> Dict[str, tuple]:
+def _effective_features(paired: pd.DataFrame, feature_set: str,
+                        use_weather: bool = True) -> Dict[str, tuple]:
     """Feature tuples, dropping weather terms when no weather store exists.
 
     A missing weather store would otherwise leave constant columns collinear
-    with the intercept and destabilize the fit.
+    with the intercept and destabilize the fit. `use_weather=False` forces the
+    weather-free fit for evaluation even when the store is populated.
     """
     fam = {k: tuple(v) for k, v in FEATURE_SETS[feature_set].items()}
-    if not _weather_available(paired):
+    if not use_weather or not _weather_available(paired):
         fam["total"] = tuple(f for f in fam["total"] if f not in _WEATHER)
     return fam
 
@@ -240,11 +241,12 @@ def sigmoid(eta: float) -> float:
 
 
 def fit_forecast_models(paired: pd.DataFrame, seasons: Sequence[int],
-                        feature_set: str = DEFAULT_FEATURE_SET) -> dict:
+                        feature_set: str = DEFAULT_FEATURE_SET,
+                        use_weather: bool = True) -> dict:
     """Fit the three family models on warm, outcome-only rows."""
     if feature_set not in FEATURE_SETS:
         raise ValueError(f"unknown feature_set {feature_set!r}")
-    fam = _effective_features(paired, feature_set)
+    fam = _effective_features(paired, feature_set, use_weather=use_weather)
     rows = fit_rows(paired, seasons)
     if len(rows) < 500:
         raise RuntimeError(f"too few paired fit games ({len(rows)})")

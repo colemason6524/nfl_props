@@ -99,6 +99,8 @@ def main() -> int:
                     default=list(HOLDOUT_SEASONS))
     ap.add_argument("--feature-set", default="all",
                     choices=("base", "full", "all"))
+    ap.add_argument("--no-weather", action="store_true",
+                    help="force the weather-free total head for comparison")
     ap.add_argument("--no-export", action="store_true")
     args = ap.parse_args()
 
@@ -125,7 +127,8 @@ def main() -> int:
 
     results = []
     for feature_set in sets:
-        fit = fit_forecast_models(paired, tune, feature_set=feature_set)
+        fit = fit_forecast_models(paired, tune, feature_set=feature_set,
+                                  use_weather=not args.no_weather)
         results.append(evaluate(fit, holdout_rows, "holdout",
                                 train_margin_mean, train_total_mean))
         results.append(evaluate(fit, train_rows, "tune",
@@ -135,12 +138,17 @@ def main() -> int:
     print(text)
     if not args.no_export:
         stamp = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
+        suffix = "_noweather" if args.no_weather else ""
         FORECAST_BACKTESTS_DIR.mkdir(parents=True, exist_ok=True)
-        (FORECAST_BACKTESTS_DIR / f"backtest_forecast_{stamp}.txt").write_text(
+        (FORECAST_BACKTESTS_DIR /
+         f"backtest_forecast{suffix}_{stamp}.txt").write_text(
             text, encoding="utf-8")
-        (FORECAST_BACKTESTS_DIR / f"backtest_forecast_{stamp}.json").write_text(
+        (FORECAST_BACKTESTS_DIR /
+         f"backtest_forecast{suffix}_{stamp}.json").write_text(
             json.dumps({"results": results, "tune": tune,
-                        "holdout": holdout}, indent=2), encoding="utf-8")
+                        "holdout": holdout,
+                        "use_weather": not args.no_weather}, indent=2),
+            encoding="utf-8")
     return 0
 
 
