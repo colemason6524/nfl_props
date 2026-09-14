@@ -15,10 +15,12 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import sys
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Tuple
+from zoneinfo import ZoneInfo
 
 import numpy as np
 import pandas as pd
@@ -28,6 +30,14 @@ from nfl_props.config import FORECAST_BACKTESTS_DIR, FORECAST_HISTORY_DIR
 from nfl_props.utils import log
 from nfl_props.version import (FORECAST_GRADING_VERSION,
                                FORECAST_MODEL_VERSION)
+
+WEEKLY_TZ = ZoneInfo(os.environ.get("NFL_WEEKLY_TZ", "America/New_York"))
+DELIVERY_MARKER = FORECAST_BACKTESTS_DIR / "grade_weekly_delivered.json"
+WEEKLY_FAMILIES = (
+    ("moneyline", "Moneylines"),
+    ("spread", "Spreads"),
+    ("total", "Totals"),
+)
 
 
 def _parse_ts(value) -> Optional[datetime]:
@@ -250,13 +260,289 @@ def render_report(stats: dict) -> str:
     return "\n".join(lines)
 
 
+def _target_week(games: pd.DataFrame, now: datetime
+                 ) -> Optional[Tuple[int, int]]:
+    """Most recent regular-season (season, week) fully kicked off before today.
+
+    "Completed" is schedule-based (every game-day before today in ET) so the
+    just-finished week is selected even if a final score is still missing;
+    those games grade as pending, never as losses.
+    """
+    if games is None or games.empty:
+        return None
+    reg = games[games["game_type"] == "REG"]
+    if reg.empty:
+        return None
+    today = now.astimezone(WEEKLY_TZ).date().isoformat()
+    days = reg["gameday"].astype(str).str[:10]
+    past = reg[days < today]
+    if past.empty:
+        return None
+    weeks = sorted({(int(s), int(w))
+                    for s, w in zip(past["season"], past["week"])})
+    return weeks[-1]
+
+
+def _week_label(games: pd.DataFrame, season: int, week: int) -> str:
+    rows = games[(games["game_type"] == "REG")
+                 & (games["season"] == season) & (games["week"] == week)]
+    days = sorted({str(d)[:10] for d in rows["gameday"].astype(str)})
+
+    def fmt(day: str) -> str:
+        return datetime.fromisoformat(day).strftime("%b %-d")
+
+    if not days:
+        return f"Week {week}"
+    if days[0] == days[-1]:
+        return f"Week {week} ({fmt(days[0])})"
+    if days[0][:7] == days[-1][:7]:
+        return (f"Week {week} ({fmt(days[0])}-"
+                f"{datetime.fromisoformat(days[-1]).day})")
+    return f"Week {week} ({fmt(days[0])}-{fmt(days[-1])})"
+
+
+def _wl_rows(rows: List[dict]) -> dict:
+    return {
+        "n": len(rows),
+        "wins": sum(1 for r in rows if r["result"] == "win"),
+        "losses": sum(1 for r in rows if r["result"] == "loss"),
+        "pushes": sum(1 for r in rows if r["result"] == "push"),
+    }
+
+
+def _record_text(wins: int, losses: int, pushes: int) -> str:
+    text = f"{wins}-{losses}"
+    if pushes:
+        text += f"-{pushes}"
+    return text
+
+
+def grade_week(season: Optional[int] = None, week: Optional[int] = None,
+               games: Optional[pd.DataFrame] = None,
+               paths: Optional[List[Path]] = None,
+               now: Optional[datetime] = None) -> dict:
+    """Grade one regular-season week: record + priced ROI + forecast quality.
+
+    Selects the latest pre-kickoff forecast per game (same rule as the
+    cumulative grader), keeps only games from the target (season, week),
+    and grades moneyline / spread / total references at captured prices.
+    """
+    from nfl_props.sources.nflverse import load_raw_games
+    now = now or datetime.now(timezone.utc)
+    if games is None:
+        games = load_raw_games()
+    paths = sorted(paths) if paths is not None else sorted(
+        FORECAST_HISTORY_DIR.glob("nfl_forecast_*.json"))
+    if season is None or week is None:
+        target = _target_week(games, now)
+        if target is None:
+            return {"error": "no completed regular-season week found"}
+        season, week = target
+    season, week = int(season), int(week)
+
+    chosen = select_latest_pregame(paths)
+    label = _week_label(games, season, week)
+
+    ref_rows: List[dict] = []
+    game_rows: List[str] = []
+    pending: List[str] = []
+    winner_n = winner_correct = 0
+    margin_err: List[float] = []
+    total_err: List[float] = []
+
+    for fc in chosen.values():
+        final = match_final(games, fc["away"], fc["home"], fc["_kickoff"])
+        if final is None or str(final.get("game_type")) != "REG" \
+                or int(final["season"]) != season \
+                or int(final["week"]) != week:
+            continue
+        matchup = f"{fc['away']} @ {fc['home']}"
+        if pd.isna(final["home_score"]) or pd.isna(final["away_score"]):
+            pending.append(matchup)
+            continue
+        hp, ap = float(final["home_score"]), float(final["away_score"])
+        game_rows.append(matchup)
+        p_home = fc.get("p_home_win")
+        if p_home is not None and hp != ap:
+            y = 1.0 if hp > ap else 0.0
+            winner_n += 1
+            winner_correct += int((p_home >= 0.5) == bool(y))
+        if fc.get("projected_margin") is not None:
+            margin_err.append(abs((hp - ap) - float(fc["projected_margin"])))
+        if fc.get("projected_total") is not None:
+            total_err.append(abs((hp + ap) - float(fc["projected_total"])))
+        for ref in fc.get("references", []):
+            if ref.get("decimal") is None:
+                continue
+            result = grade_reference(ref, hp, ap)
+            if result is None:
+                continue
+            ref_rows.append({
+                "family": ref.get("family"), "source": ref.get("source"),
+                "status": ref.get("status"),
+                "result": result,
+                "units": units(result, float(ref["decimal"])),
+            })
+
+    record = _wl_rows(ref_rows)
+    decided = record["wins"] + record["losses"]
+    families = {fam: _wl_rows([r for r in ref_rows if r["family"] == fam])
+                for fam, _ in WEEKLY_FAMILIES}
+    sources: Dict[str, List[dict]] = {}
+    for row in ref_rows:
+        sources.setdefault(str(row["source"]), []).append(row)
+    unit_total = round(sum(r["units"] for r in ref_rows), 2)
+    return {
+        "grading_version": FORECAST_GRADING_VERSION,
+        "model_version": FORECAST_MODEL_VERSION,
+        "mode": "weekly",
+        "graded_at_utc": now.isoformat(),
+        "season": season,
+        "week": week,
+        "label": label,
+        "games": sorted(game_rows),
+        "pending": sorted(pending),
+        "winner": {
+            "n": winner_n,
+            "correct": winner_correct,
+            "accuracy": (round(winner_correct / winner_n, 4)
+                         if winner_n else None),
+        },
+        "projection": {
+            "margin_mae": (round(float(np.mean(margin_err)), 3)
+                           if margin_err else None),
+            "total_mae": (round(float(np.mean(total_err)), 3)
+                          if total_err else None),
+        },
+        "record": {**record, "pct": (round(record["wins"] / decided, 4)
+                                     if decided else None)},
+        "families": families,
+        "priced": {
+            "units": unit_total,
+            "plays": len(ref_rows),
+            "roi": (round(unit_total / len(ref_rows), 4)
+                    if ref_rows else None),
+        },
+        "sources": {
+            name: {
+                **_wl_rows(rows),
+                "units": round(sum(r["units"] for r in rows), 2),
+                "roi": (round(sum(r["units"] for r in rows) / len(rows), 4)
+                        if rows else None),
+            }
+            for name, rows in sorted(sources.items())
+        },
+    }
+
+
+def render_weekly_recap(stats: dict) -> str:
+    """Public weekly recap: week record, family records, priced ROI."""
+    rec = stats["record"]
+    pct = " (n/a)" if rec["pct"] is None else f" ({rec['pct']:.1%})"
+    lines = [
+        f"NFL Board Recap - {stats['label']}",
+        "",
+        f"Week record: {_record_text(rec['wins'], rec['losses'], rec['pushes'])}{pct}",
+    ]
+    for fam_key, fam_label in WEEKLY_FAMILIES:
+        g = stats["families"][fam_key]
+        if g["n"]:
+            lines.append(f"  {fam_label}: "
+                         f"{_record_text(g['wins'], g['losses'], g['pushes'])}")
+    priced = stats["priced"]
+    if priced["plays"]:
+        lines += ["", f"Priced ROI: {priced['units']:+.2f}u across "
+                      f"{priced['plays']} plays ({priced['roi']:+.1%})"]
+    else:
+        lines += ["", "Priced ROI: n/a (no graded references)"]
+    if stats["pending"]:
+        lines.append(f"Pending: {len(stats['pending'])} games")
+    return "\n".join(lines)
+
+
+def _load_weekly_delivered() -> set:
+    if not DELIVERY_MARKER.exists():
+        return set()
+    try:
+        return set(json.loads(DELIVERY_MARKER.read_text()).get("weeks", []))
+    except (json.JSONDecodeError, OSError):
+        return set()
+
+
+def _record_weekly_delivered(key: str) -> None:
+    keys = _load_weekly_delivered()
+    keys.add(key)
+    DELIVERY_MARKER.parent.mkdir(parents=True, exist_ok=True)
+    DELIVERY_MARKER.write_text(json.dumps({"weeks": sorted(keys)}, indent=1),
+                               encoding="utf-8")
+
+
+def _post_weekly_recap(stats: dict, force: bool) -> int:
+    """Post the weekly recap once per season/week. Returns 0 ok, 1 failure."""
+    webhook = os.environ.get("NFL_DISCORD_WEBHOOK_URL", "")
+    if not webhook:
+        log("[grade_forecast] discord on but NFL_DISCORD_WEBHOOK_URL unset")
+        return 1
+    key = f"{stats['season']}-w{int(stats['week']):02d}"
+    if key in _load_weekly_delivered() and not force:
+        log(f"[grade_forecast] week {key} already delivered; skipping")
+        return 0
+    from nfl_props.notifiers.forecast_discord import (chunk_messages,
+                                                      post_webhook)
+    for chunk in chunk_messages(render_weekly_recap(stats)):
+        result = post_webhook(webhook, chunk)
+        if not result.ok:
+            log(f"[grade_forecast] discord failed: "
+                f"{result.error or result.status_code}")
+            return 1
+    _record_weekly_delivered(key)
+    log("[grade_forecast] weekly discord ok")
+    return 0
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description="grade forecast-first snapshots")
     ap.add_argument("--since", default="", help="ISO date lower bound")
     ap.add_argument("--no-export", action="store_true")
+    ap.add_argument("--weekly", action="store_true",
+                    help="week-scoped public recap for the just-completed week")
+    ap.add_argument("--season", type=int, default=None,
+                    help="weekly mode: override season (default: auto)")
+    ap.add_argument("--week", type=int, default=None,
+                    help="weekly mode: override week (default: auto)")
+    ap.add_argument("--discord", action="store_true",
+                    help="weekly mode: post the recap (also honors "
+                    "NFL_SEND_DISCORD)")
+    ap.add_argument("--no-discord", action="store_true")
+    ap.add_argument("--force-send", action="store_true",
+                    help="weekly mode: repost even if this week was delivered")
     args = ap.parse_args()
 
     config.ensure_dirs()
+    if args.weekly:
+        stats = grade_week(season=args.season, week=args.week)
+        if stats.get("error"):
+            print(f"weekly grade: {stats['error']}")
+            return 1
+        text = render_weekly_recap(stats)
+        print(text)
+        if not args.no_export:
+            stamp = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
+            tag = f"{stats['season']}w{int(stats['week']):02d}"
+            FORECAST_BACKTESTS_DIR.mkdir(parents=True, exist_ok=True)
+            (FORECAST_BACKTESTS_DIR /
+             f"grade_weekly_{tag}_{stamp}.txt").write_text(text,
+                                                           encoding="utf-8")
+            (FORECAST_BACKTESTS_DIR /
+             f"grade_weekly_{tag}_{stamp}.json").write_text(
+                 json.dumps(stats, indent=2), encoding="utf-8")
+            log(f"[grade_forecast] wrote weekly {tag} report")
+        env_send = os.environ.get("NFL_SEND_DISCORD", "").lower() in (
+            "1", "true", "yes")
+        send = (args.discord or env_send) and not args.no_discord
+        if send:
+            return _post_weekly_recap(stats, force=args.force_send)
+        return 0
     stats = grade_all(args.since)
     text = render_report(stats)
     print(text)

@@ -39,6 +39,14 @@ case "$TASK" in
         COMMAND=(bash -c 'grade_exit=0; "$1" grade_forecast.py || grade_exit=$?; "$1" -m nfl_props.cli refresh-data && "$1" -m nfl_props.cli build && "$1" -m nfl_props.cli rebuild-state && "$1" -m nfl_props.cli rebuild-state-v2 && "$1" -m nfl_props.cli rebuild-forecast-state; refresh_exit=$?; if (( grade_exit != 0 )); then exit "$grade_exit"; fi; exit "$refresh_exit"' _ "$PYTHON_EXE")
         REQUIRED_SECRET=
         ;;
+    weekly-grade)
+        LOG_FILE="$LOG_DIR/nfl_weekly_grade.log"
+        TIMEOUT=30m
+        # Refresh finals (games.csv only), then grade the just-completed week
+        # and post the public recap. The Tuesday model-strength task is separate.
+        COMMAND=(bash -c '"$1" -c "from nfl_props.sources.nflverse import refresh_data; refresh_data(seasons=[])" && "$1" grade_forecast.py --weekly --discord' _ "$PYTHON_EXE")
+        REQUIRED_SECRET=NFL_DISCORD_WEBHOOK_URL
+        ;;
     *)
         printf 'Unknown task: %s\n' "$TASK" >&2
         exit 2
