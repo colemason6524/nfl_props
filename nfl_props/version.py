@@ -23,4 +23,4 @@ TOTAL_MODEL_VERSION = "nfl-total-ridge-v2"
 FORECAST_HISTORY_SCHEMA_VERSION = 1
 PRODUCT_POLICY_VERSION = "nfl-forecast-first-v1"
 VALUE_POLICY_VERSION = "nfl-value-bands-v1"
-FORECAST_GRADING_VERSION = "nfl-forecast-grading-v1"
+FORECAST_GRADING_VERSION = "nfl-forecast-grading-v2"

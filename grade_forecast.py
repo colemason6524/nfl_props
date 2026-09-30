@@ -347,8 +347,16 @@ def grade_week(season: Optional[int] = None, week: Optional[int] = None,
     game_rows: List[str] = []
     pending: List[str] = []
     winner_n = winner_correct = 0
+    brier_terms: List[float] = []
+    logloss_terms: List[float] = []
     margin_err: List[float] = []
     total_err: List[float] = []
+    margin_residuals: List[dict] = []
+    total_residuals: List[dict] = []
+    reference_errors: Dict[str, List[float]] = {"spread": [], "total": []}
+    confidence_rows: List[dict] = []
+    directional_reversals = 0
+    market_reversal_n = market_reversal_correct = market_reversal_incorrect = 0
 
     for fc in chosen.values():
         final = match_final(games, fc["away"], fc["home"], fc["_kickoff"])
@@ -361,17 +369,72 @@ def grade_week(season: Optional[int] = None, week: Optional[int] = None,
             pending.append(matchup)
             continue
         hp, ap = float(final["home_score"]), float(final["away_score"])
+        actual_margin, actual_total = hp - ap, hp + ap
         game_rows.append(matchup)
         p_home = fc.get("p_home_win")
         if p_home is not None and hp != ap:
             y = 1.0 if hp > ap else 0.0
             winner_n += 1
             winner_correct += int((p_home >= 0.5) == bool(y))
+            brier_terms.append((float(p_home) - y) ** 2)
+            p = min(max(float(p_home), 1e-9), 1 - 1e-9)
+            logloss_terms.append(-(y * np.log(p) + (1 - y) * np.log(1 - p)))
+            confidence = fc.get("winner_confidence")
+            confidence = float(confidence if confidence is not None else max(p_home, 1 - p_home))
+            group = ("50-60%" if confidence < .60 else "60-70%" if confidence < .70
+                     else "70-80%" if confidence < .80 else "80-100%")
+            won = (p_home >= .5) == bool(y)
+            confidence_rows.append({"group": group, "correct": won,
+                                    "confidence": confidence})
+            # Winner model-vs-market favorite reversal (game level). The stored
+            # `p_market` is the consensus de-vigged market probability for the
+            # *model's chosen side* (see nfl_props.references.build_reference),
+            # so a chosen side the market prices below 0.5 is the market
+            # underdog: the model is reversing the market's favorite. This is
+            # separate from the margin sign count `directional_reversals`
+            # above; ties are excluded because this sits inside the decided
+            # winner block.
+            model_side = "home" if float(p_home) >= .5 else "away"
+            market_p = None
+            for ref in fc.get("references", []):
+                if ref.get("family") == "moneyline" \
+                        and ref.get("side") == model_side \
+                        and ref.get("p_market") is not None:
+                    market_p = float(ref["p_market"])
+                    break
+            if market_p is not None and market_p < 0.5:
+                market_reversal_n += 1
+                if won:
+                    market_reversal_correct += 1
+                else:
+                    market_reversal_incorrect += 1
         if fc.get("projected_margin") is not None:
-            margin_err.append(abs((hp - ap) - float(fc["projected_margin"])))
+            predicted = float(fc["projected_margin"])
+            residual = actual_margin - predicted
+            margin_err.append(abs(residual))
+            margin_residuals.append({"matchup": matchup, "actual": actual_margin,
+                                     "predicted": predicted, "residual": residual,
+                                     "abs_residual": abs(residual)})
+            if actual_margin and predicted and (actual_margin > 0) != (predicted > 0):
+                directional_reversals += 1
         if fc.get("projected_total") is not None:
-            total_err.append(abs((hp + ap) - float(fc["projected_total"])))
+            predicted = float(fc["projected_total"])
+            residual = actual_total - predicted
+            total_err.append(abs(residual))
+            total_residuals.append({"matchup": matchup, "actual": actual_total,
+                                    "predicted": predicted, "residual": residual,
+                                    "abs_residual": abs(residual)})
         for ref in fc.get("references", []):
+            line = ref.get("line")
+            if ref.get("family") == "spread" and line is not None \
+                    and ref.get("side") in ("home", "away"):
+                # Home-side line is the home handicap; away-side line is the
+                # away handicap. Convert each to home-minus-away margin.
+                predicted = (-float(line) if ref.get("side") == "home"
+                             else float(line))
+                reference_errors["spread"].append(actual_margin - predicted)
+            elif ref.get("family") == "total" and line is not None:
+                reference_errors["total"].append(actual_total - float(line))
             if ref.get("decimal") is None:
                 continue
             result = grade_reference(ref, hp, ap)
@@ -380,6 +443,7 @@ def grade_week(season: Optional[int] = None, week: Optional[int] = None,
             ref_rows.append({
                 "family": ref.get("family"), "source": ref.get("source"),
                 "status": ref.get("status"),
+                "edge_band": _edge_band(ref.get("edge")),
                 "result": result,
                 "units": units(result, float(ref["decimal"])),
             })
@@ -392,6 +456,40 @@ def grade_week(season: Optional[int] = None, week: Optional[int] = None,
     for row in ref_rows:
         sources.setdefault(str(row["source"]), []).append(row)
     unit_total = round(sum(r["units"] for r in ref_rows), 2)
+
+    def error_summary(values: List[float]) -> dict:
+        return {"n": len(values), "mae": round(float(np.mean(np.abs(values))), 3) if values else None,
+                "signed_mean": round(float(np.mean(values)), 3) if values else None,
+                "signed_median": round(float(np.median(values)), 3) if values else None,
+                "sign": "actual minus predicted"}
+
+    confidence_groups: Dict[str, List[dict]] = {}
+    for row in confidence_rows:
+        confidence_groups.setdefault(row["group"], []).append(row)
+    confidence_report: Dict[str, dict] = {}
+    for name, rows in sorted(confidence_groups.items()):
+        n = len(rows)
+        correct = sum(r["correct"] for r in rows)
+        accuracy = round(correct / n, 4)
+        mean_confidence = round(float(np.mean([r["confidence"] for r in rows])),
+                                4)
+        # Selected confidence minus observed outcome (win=1, loss=0): a
+        # positive gap means the bucket was overconfident on this sample.
+        confidence_report[name] = {
+            "n": n,
+            "correct": correct,
+            "accuracy": accuracy,
+            "mean_confidence": mean_confidence,
+            "calibration_gap": round(mean_confidence - accuracy, 4),
+        }
+
+    def grouped_outcomes(key: str) -> dict:
+        groups: Dict[str, List[dict]] = {}
+        for row in ref_rows:
+            groups.setdefault(str(row[key]), []).append(row)
+        return {name: {**_wl_rows(rows), "units": round(sum(r["units"] for r in rows), 2)}
+                for name, rows in sorted(groups.items())}
+
     return {
         "grading_version": FORECAST_GRADING_VERSION,
         "model_version": FORECAST_MODEL_VERSION,
@@ -405,15 +503,32 @@ def grade_week(season: Optional[int] = None, week: Optional[int] = None,
         "winner": {
             "n": winner_n,
             "correct": winner_correct,
-            "accuracy": (round(winner_correct / winner_n, 4)
-                         if winner_n else None),
+            "accuracy": (round(winner_correct / winner_n, 4) if winner_n else None),
+            "brier": round(float(np.mean(brier_terms)), 4) if brier_terms else None,
+            "log_loss": round(float(np.mean(logloss_terms)), 4) if logloss_terms else None,
+        },
+        "market_reversals": {
+            "n": market_reversal_n,
+            "correct": market_reversal_correct,
+            "incorrect": market_reversal_incorrect,
+            "win_rate": (round(market_reversal_correct / market_reversal_n, 4)
+                         if market_reversal_n else None),
         },
         "projection": {
-            "margin_mae": (round(float(np.mean(margin_err)), 3)
-                           if margin_err else None),
-            "total_mae": (round(float(np.mean(total_err)), 3)
-                          if total_err else None),
+            "margin_mae": round(float(np.mean(margin_err)), 3) if margin_err else None,
+            "total_mae": round(float(np.mean(total_err)), 3) if total_err else None,
+            "margin_residual": error_summary([r["residual"] for r in margin_residuals]),
+            "total_residual": error_summary([r["residual"] for r in total_residuals]),
+            "directional_reversals": directional_reversals,
+            "largest_margin_residuals": sorted(margin_residuals, key=lambda r: (-r["abs_residual"], r["matchup"]))[:5],
+            "largest_total_residuals": sorted(total_residuals, key=lambda r: (-r["abs_residual"], r["matchup"]))[:5],
         },
+        "reference_forecast_error": {
+            "spread_margin": error_summary(reference_errors["spread"]),
+            "total": error_summary(reference_errors["total"]),
+        },
+        "confidence_groups": confidence_report,
+        "edge_bands": grouped_outcomes("edge_band"),
         "record": {**record, "pct": (round(record["wins"] / decided, 4)
                                      if decided else None)},
         "families": families,

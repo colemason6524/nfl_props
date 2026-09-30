@@ -4,11 +4,11 @@
 
 | When (America/New_York) | What | Runs on |
 |---|---|---|
-| Thu 17:00 | Forecast Thursday games | `nfl-props-board` timer |
-| Sun 11:00 | Forecast Sunday early slate | `nfl-props-board` timer |
-| Sun 16:00 | Forecast remaining Sunday evening slate | `nfl-props-board` timer |
-| Mon 18:00 | Forecast Monday game | `nfl-props-board` timer |
-| Tue 09:00 | Grade forecasts, refresh data, rebuild v1+v2+forecast state | `nfl-props-grade` timer |
+| Thu 17:00 | Forecast Thursday games | `sports-nfl-board` fleet timer |
+| Sun 11:00 | Forecast Sunday early slate | `sports-nfl-board` fleet timer |
+| Sun 16:00 | Forecast remaining Sunday evening slate | `sports-nfl-board` fleet timer |
+| Mon 18:00 | Forecast Monday game | `sports-nfl-board` fleet timer |
+| Tue 09:00 | Grade forecasts, refresh data, rebuild v1+v2+forecast state | `sports-nfl-grade` fleet timer |
 
 Each run publishes only the current ET day's not-yet-started games, in three
 Discord sections (Moneylines / Spreads / Totals), with no truncation. On the VM
@@ -20,7 +20,10 @@ these call `scripts/run_nfl_linux_task.sh {board|grade}`; the board task runs
 that is coverage, not failure.
 
 The legacy price-screened board (`run_board.py`, `grade.py`) is retired
-operationally and kept only for historical cohort grading.
+operationally and kept only for historical cohort grading. Weekly forecast
+JSON grading diagnostics (grading version `nfl-forecast-grading-v2`) are
+specified in [`WEEK4_GRADE_DIAGNOSTICS.md`](WEEK4_GRADE_DIAGNOSTICS.md); the
+public weekly recap remains unchanged.
 
 ## Linux production (Azure VM) — current
 
@@ -28,12 +31,14 @@ Deploy/verify steps: [`DEPLOY_LINUX.md`](DEPLOY_LINUX.md). Summary:
 
 - Repo `~/nfl_props` on `azureuser@130.131.0.6`; venv; one-time data
   bootstrap (`refresh-data` → `build` → `rebuild-state[-v2]`).
-- systemd: `scripts/systemd/nfl-props-{board,grade}.{service,timer}`,
-  installed to `/etc/systemd/system`, `enable --now`, `Persistent=true`.
+- User-level `sports-*` fleet timers (production since 2026-09-09):
+  `sports-nfl-board` (daily 10:56 ET), `sports-nfl-grade` (Tue 08:47 ET),
+  `Persistent=false`. Disabled system-level `nfl-props-*` timers remain in
+  `scripts/systemd/` as a documented fallback.
 - Env/config in `~/.config/nfl_props/env`; logs in
-  `logs/nfl_board.log` / `logs/nfl_grade.log` plus `journalctl`.
-- Verify: `systemctl list-timers | grep nfl-props`, trigger a service once,
-  check the log endings (`exit=0`, `grade_exit=0 refresh_exit=0`).
+  `logs/nfl_forecast.log` / `logs/nfl_grade.log` plus `journalctl`.
+- Verify: `systemctl list-timers --all | grep sports-nfl`, trigger a timer
+  once, check the log endings (`exit=0`, `grade_exit=0 refresh_exit=0`).
 
 ## Windows Task Scheduler setup (RETIRED)
 
@@ -58,7 +63,7 @@ retirement. History/logs were migrated to the Mac before shutdown.
   `team_total_diagnostics.unmatched_total_desc` to verify the parser against
   real market descriptions.
 - Terminal output caps Watch rows at 30 for readability; every candidate is
-  still exported to history. `run_board.py --all-watch` prints all Watch rows.
+  still exported to history. `run_forecast_board.py --all-watch` prints all Watch rows.
 - Tests: `.venv\Scripts\python -m unittest discover -s tests` (Mac:
   `.venv/bin/python -m unittest discover -s tests`).
 
@@ -102,14 +107,14 @@ ignore the warnings.
 | Symptom | Check |
 |---|---|
 | Empty board | `outputs/diagnostics/bovada_coverage_*.json` — fetch failed vs no games posted |
-| `state as of` stale during season | weekly rebuild task didn't run; check `logs\nfl_grade.log` |
+| `state as of` stale during season | weekly rebuild task didn't run; check `logs/nfl_grade.log` |
 | Grade "unmatched games" | team alias missing in `teams.py`, or kickoff/date drift beyond ±1 day |
 | pbp 404 for current season | normal before the season's first game is published |
 | Grade "pending" rows | normal until nflverse posts final scores (usually same night / next morning) |
 
 ## Rules of engagement
 
-- Do not retune thresholds from fewer than ~50–100 graded Core/Lean plays.
+- Do not retune thresholds from fewer than ~50–100 graded plays.
 - Oversized EV (> `NFL_EV_MAX`) stays in Watch. Do not promote by hand.
 - Preseason (Aug 2026): pipeline dry-runs only, nothing graded as a pick.
 - Record findings in `docs/PLAN.md` (findings log), not in chat memory.

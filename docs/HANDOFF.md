@@ -8,12 +8,12 @@ cross-sport playbook (`tennis_props/docs/PLAYBOOK.md`). Free data only:
 nflverse historical parquet/CSV + Bovada live JSON. FanDuel is the bet-at
 book; its scraper is deferred.
 
-## Current state (2026-09-07)
+## Current state (2026-09-16)
 
 - Git: pushed to https://github.com/colemason6524/nfl_props (`main`).
 - Full pipeline works end to end on this Mac: `refresh-data` → `build`
-  (pbp match rate 1.0000 for 2013–2025) → `rebuild-state[-v2]` →
-  `run_board.py` → `grade.py`.
+  (pbp match rate 1.0000 for 2013–2025) → `rebuild-forecast-state` →
+  `run_forecast_board.py` → `grade_forecast.py`.
 - 2026 pbp 404s until the season's first games are published; ratings state
   is as of the 2025 season finale (2026-02-08) until the first weekly
   rebuild.
@@ -25,11 +25,11 @@ book; its scraper is deferred.
   Scheduler jobs disabled after running green since 2026-08-14; `outputs/`
   history + logs migrated to the Mac).
 - **Linux prod live: Azure VM** (`ssh -i ~/Downloads/RunThemScripts_key.pem
-  azureuser@130.131.0.6`), repo `~/nfl_props`, systemd timers
-  `nfl-props-board` (daily 11:00) + `nfl-props-grade` (Tue 09:00), both
-  America/Detroit via `OnCalendar` TZ suffix. Deploy/verify:
-  `docs/DEPLOY_LINUX.md`. Mac keeps the bulk of files (canonical history
-  copy); an interim tmux scheduler experiment was replaced by systemd.
+  azureuser@130.131.0.6`), repo `~/nfl_props`, user-level fleet timers
+  `sports-nfl-board` (daily 10:56 ET) + `sports-nfl-grade` (Tue 08:47 ET),
+  `Persistent=false`. System-level `nfl-props-*` timers disabled 2026-09-09;
+  deploy/verify: `docs/DEPLOY_LINUX.md`. Mac keeps the bulk of files
+  (canonical history copy).
 - Discord: env file `~/.config/nfl_props/env` on the VM carries
   `NFL_SEND_DISCORD` + `NFL_DISCORD_WEBHOOK_URL` (Core-only digest; empty
   Core sends nothing).
@@ -63,7 +63,9 @@ book; its scraper is deferred.
   Watch).
 - Every run exports full history JSON; grading uses the latest pre-kickoff
   snapshot per (matchup, market, side).
-- Versions in `nfl_props/version.py`: schema 3, `nfl-epa-points-v1.1`,
+- Versions in `nfl_props/version.py`: schema 3, `nfl-forecast-v1.1`
+  (forecast-first), `nfl-forecast-grading-v1` / `nfl-forecast-grading-v2`
+  (forecast grading). Legacy frozen: `nfl-epa-points-v1.1`,
   `core-lean-watch-v2`. Bump the model version only when probabilities
   change.
 
@@ -75,3 +77,28 @@ book; its scraper is deferred.
    `docs/PLAN.md` findings; decide Discord promotion.
 4. Deferred: FanDuel scrape, alt team totals, QB-out/injury flags (shadow
    fields first), playoff handling.
+
+## Weekly reflections
+
+Deep-dive analyses of each week's results live in `docs/WEEKLY_REFLECTIONS.md`.
+This is the primary document for tracking model performance, anomalies, and
+learnings week-over-week. Copy the template at the top for each new week.
+
+## Current state (2026-09-30)
+
+- The Week 4 readiness rollout adds weekly JSON diagnostics under
+  `nfl-forecast-grading-v2`: projection residuals, captured-line residuals,
+  winner/market reversals, confidence calibration summaries, edge-band
+  outcomes, and largest residuals.
+- Forecast/model and value-policy versions remain `nfl-forecast-v1.1` and
+  `nfl-value-bands-v1`; predictions, labels, and public Discord recap are
+  unchanged. No state rebuild or dependency update is needed.
+- Local verification: `python3 -m unittest tests.test_weekly_grade` (11 tests),
+  `python3 -m unittest discover -s tests` (70 tests), and `git diff --check`.
+- Linux deployment is requested; do not mark it deployed until the commit is
+  pulled and the VM repository revision is verified. The diagnostic artifact
+  check is pending the next natural weekly grade; do not force a grade or
+  repost Discord during deployment.
+- This remains an observation-only study through Week 8. No production model,
+  action-label, threshold, or policy changes are approved by this diagnostic
+  rollout.

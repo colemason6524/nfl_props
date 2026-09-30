@@ -22,10 +22,11 @@ The authoritative product rules live in [`docs/PRODUCT_CONTRACT.md`](docs/PRODUC
 - Creates a weekly NFL-universe forecast even when a game is unpriced; internal
   disagreement between the three heads is shown, not hidden.
 - Grades forecast accuracy (winner accuracy, Brier, log loss, margin/total MAE)
-  separately from flat-1u reference ROI at captured prices.
+  separately from flat-1u reference ROI at captured prices; weekly JSON reports
+  also include residual, market-reversal, confidence, and edge-band diagnostics.
 - Continues into the postseason.
 
-## Status (2026-09-12)
+## Status (2026-09-30)
 
 | Phase | Status |
 |---|---|
@@ -33,7 +34,7 @@ The authoritative product rules live in [`docs/PRODUCT_CONTRACT.md`](docs/PRODUC
 | Forecast-first models (`nfl-forecast-v1.1`) | **done** |
 | Current-day schedule board + Bovada/Polymarket references | **done** |
 | Discord three-section board (no truncation) | **done** |
-| Forecast grading + ROI (`grade_forecast.py`) | **done** |
+| Forecast grading + ROI (`grade_forecast.py`) | **done** (weekly analytics v2; see [diagnostics](docs/WEEK4_GRADE_DIAGNOSTICS.md)) |
 | Forecast backtest (`backtest_forecast.py`) | **done** |
 | Weather store populated + total head (`cli backfill-weather`) | **done** (Open-Meteo; improves total MAE) |
 | Personnel / injury feed | **deferred** (fail-open scaffold) |

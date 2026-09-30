@@ -1,6 +1,23 @@
 # NFL Props — Next Check-In
 
-## 0. Tue Sep 8 audit fix (deployed to the Azure VM)
+## Current check-in — 2026-09-30
+
+- Week 4 grade-diagnostics change is being committed and deployed to the
+  existing Azure VM; verify `git rev-parse HEAD` there matches the approved
+  commit and `git status --short` shows no unexpected modifications.
+- No board/grade timer, forced grade, or Discord post is needed for this
+  grade-schema-only update. No forecast-state rebuild is needed.
+- At the next scheduled weekly grade, verify the weekly JSON has
+  `grading_version: nfl-forecast-grading-v2` and the `market_reversals`,
+  `confidence_groups`, residual, `reference_forecast_error`, and `edge_bands`
+  fields; check `logs/nfl_weekly_grade.log` for successful completion and
+  zero unmatched games. The new artifact check is pending until that grade.
+- Continue the pre-registered Week 4–8 observation plan: preserve forecast
+  coverage and latest-pre-kickoff grading; no model, value-policy, threshold,
+  or production recommendation changes before the Week 8 evidence review.
+- Detailed rollout and schema semantics: `docs/WEEK4_GRADE_DIAGNOSTICS.md`.
+
+## 0. Historical Tue Sep 8 audit fix (deployed to the Azure VM)
 - **Season carryover in live state** (`ratings/epa.py`, `ratings/v2.py`):
   `rebuild-state` exported raw replay state, so all 32 teams (no 2026 game
   yet) carried full 2025 strength into live boards while the backtest
@@ -18,38 +35,36 @@
 
 ## 1. Status
 Production migrated 2026-09-07/08 and **verified live**: Windows retired
-(tasks disabled), Azure VM running systemd timers (`nfl-props-board` daily
-11:00, `nfl-props-grade` Tue 09:00, both America/Detroit). Both services
-were triggered manually under systemd and returned exit 0; grading over the
-migrated 35-snapshot history reports `graded 0 | pending 18 | unmatched 0`.
-The interim tmux scheduler experiment (bash while-loops in tmux) was
-removed. Tue Sep 8 grade fired on schedule; Week 1 kicks off ~Sep 9–10.
-Single-side policy live (tier v2): one Core/Lean side per (game, market),
-`OPPOSITE_SIDE` → Watch. Team totals verified: 32/32 parsed, unmatched
-descriptions are player props. Model v1.1 (carryover export included).
+(tasks disabled), Azure VM running user-level fleet timers (`sports-nfl-board`
+daily 10:56 ET, `sports-nfl-grade` Tue 08:47 ET, `Persistent=false`).
+System-level `nfl-props-*` timers disabled 2026-09-09. The interim tmux
+scheduler experiment was removed. Single-side policy live (tier v2): one
+Core/Lean side per (game, market), `OPPOSITE_SIDE` → Watch. Team totals
+verified: 32/32 parsed, unmatched descriptions are player props. Model v1.1
+(carryover export included).
 
-## 2. Next action — WHEN: Tue Sep 8 09:00 ET (first `nfl-props-grade` timer run)
-- Verify the grade service runs clean under systemd: `journalctl -u
-  nfl-props-grade.service`, `logs/nfl_grade.log` ends
-  `grade_exit=0 refresh_exit=0`, and the first `outputs/backtests/grade_*.txt`
-  appears (sparse/empty grades = success, not failure).
-- Confirm the board timer fired 11:00 ET: same-day
-  `outputs/history/nfl_board_*.json`, `exit=0` in `logs/nfl_board.log`.
+## 2. Next action — WHEN: Tue Sep 8 09:00 ET (first `sports-nfl-grade` fleet run)
+- Verify the grade service runs clean: `logs/nfl_grade.log` ends
+  `grade_exit=0 refresh_exit=0`, and the first
+  `outputs/forecast_backtests/grade_forecast_*.txt` appears (sparse/empty
+  grades = success, not failure).
+- Confirm the board fleet fired 10:56 ET: same-day
+  `outputs/forecast_history/nfl_forecast_*.json`, `exit=0` in
+  `logs/nfl_forecast.log`.
 - Week 1 2026 = live go-live per docs/PLAN.md: flat 1u, no per-play sizing
   changes.
-- After Week 1 resolves, compare graded rows vs v2_shadow rows before any
-  further thought.
+- After Week 1 resolves, compare forecast accuracy and reference ROI.
 
 ## 3. Check on pop-back
-- `systemctl list-timers --no-pager | grep nfl-props` — both pending.
-- Latest `outputs/history/nfl_board_*.json` is same-day (VM), and the Mac's
-  canonical copy stays within a few days if you want the bulk mirror.
-- Board summary: Core=0 is expected pre-week-1; confirm Lean/Watch counts stay
-  sane; team totals are posted and parsed (`team_totals_found` ≈ 32).
-- `logs/nfl_board.log` / `logs/nfl_grade.log` on the VM end with `exit=0` /
-  `grade_exit=0 refresh_exit=0`.
-- v2 shadow columns (`mu_*_v2`) present in history projections — shadow is
-  collecting, not driving.
+- Fleet timers: check `sports-nfl-board` and `sports-nfl-grade` in the
+  user's scheduler. System-level `nfl-props-*` timers are disabled.
+- Latest `outputs/forecast_history/nfl_forecast_*.json` is same-day (VM),
+  and the Mac's canonical copy stays within a few days if you want the bulk
+  mirror.
+- Board summary: confirm Lean/Watch counts stay sane; team totals are posted
+  and parsed (`team_totals_found` ≈ 32).
+- `logs/nfl_forecast.log` / `logs/nfl_grade.log` on the VM end with
+  `exit=0` / `grade_exit=0 refresh_exit=0`.
 
 ## 4. Do NOT
 - No EV-window/threshold churn; go-live stays honest flat 1u on the locked
@@ -61,10 +76,10 @@ descriptions are player props. Model v1.1 (carryover export included).
 
 ## 5. Leave-off pointer
 - Production: Azure VM per `docs/DEPLOY_LINUX.md` (repo `~/nfl_props`,
-  timers live). Windows: retired, tasks disabled, files on hard drive +
+  fleet timers live). Windows: retired, tasks disabled, files on hard drive +
   Mac.
 - Files to start from: `docs/PLAN.md` (go-live gate), `docs/HANDOFF.md`,
-  `grade.py`, `run_board.py`, `journalctl -u nfl-props-board`.
+  `grade_forecast.py`, `run_forecast_board.py`, `docs/OPERATIONS.md`.
 - Retired in this pass: tmux scheduler experiment
   (`run_nfl_tmux_task.sh`, `start_nfl_tmux_scheduler.sh`,
   `nfl-props-tmux.service`).

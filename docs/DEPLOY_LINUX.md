@@ -29,7 +29,7 @@ fire time does not replay after downtime.
 | SSH from Mac | `ssh -i ~/Downloads/RunThemScripts_key.pem azureuser@130.131.0.6` |
 | Repo | `~/nfl_props` (git@github.com:colemason6524/nfl_props.git) |
 | Python | system 3.10; venv at `.venv` |
-| Schedule | forecast board Thu 17:00 / Sun 11:00 / Sun 16:00 / Mon 18:00 America/New_York; grade+rebuild Tue 09:00 |
+| Schedule | forecast board Thu 17:00 / Sun 11:00 / Sun 16:00 / Mon 18:00 America/New_York (via `sports-nfl-board` fleet, `Persistent=false`); grade+rebuild Tue 09:00 (via `sports-nfl-grade` fleet) |
 | Config | `~/.config/nfl_props/env` (TZ, NFL_SEND_DISCORD, NFL_DISCORD_WEBHOOK_URL) |
 | Logs | `~/nfl_props/logs/nfl_forecast.log`, `logs/nfl_grade.log` + `journalctl` |
 | Lock | `~/.local/state/nfl_props/run.lock` (flock — board/grade never overlap) |
@@ -63,9 +63,10 @@ mkdir -p ~/.config/nfl_props && printf 'TZ=America/Detroit\n' > ~/.config/nfl_pr
 .venv/bin/python -m nfl_props.cli build
 .venv/bin/python -m nfl_props.cli rebuild-state
 .venv/bin/python -m nfl_props.cli rebuild-state-v2
+.venv/bin/python -m nfl_props.cli rebuild-forecast-state
 .venv/bin/python -m unittest discover -s tests
-.venv/bin/python run_board.py                    # manual smoke
-.venv/bin/python grade.py --no-refresh           # pending is a pass
+.venv/bin/python run_forecast_board.py           # manual smoke
+.venv/bin/python grade_forecast.py --no-refresh  # pending is a pass
 ```
 
 Migrate grading history from the old host before the first in-season grade:
@@ -94,8 +95,8 @@ systemctl list-timers --no-pager | grep nfl-props
 systemctl list-timers --no-pager | grep nfl-props      # both timers pending
 sudo systemctl start nfl-props-board.service           # manual trigger
 journalctl -u nfl-props-board.service -n 50 --no-pager # full board output
-tail -5 ~/nfl_props/logs/nfl_board.log                 # ends with exit=0
-ls -t ~/nfl_props/outputs/history/ | head -1           # same-day snapshot
+tail -5 ~/nfl_props/logs/nfl_forecast.log             # ends with exit=0
+ls -t ~/nfl_props/outputs/forecast_history/ | head -1  # same-day snapshot
 sudo systemctl start nfl-props-grade.service
 tail -8 ~/nfl_props/logs/nfl_grade.log                 # grade_exit=0 refresh_exit=0
 ```
@@ -113,7 +114,11 @@ ssh -i ~/Downloads/RunThemScripts_key.pem azureuser@130.131.0.6 \
 
 Tasks need no changes after a pull unless `requirements.txt` changed (rerun
 pip install) or `nfl_props/version.py` bumped the model version (run a manual
-`rebuild-state` + `rebuild-state-v2`).
+`rebuild-state` + `rebuild-state-v2` + `rebuild-forecast-state`). A grading
+version-only update does not change forecast state and requires no model
+rebuild; verify the next weekly JSON grade artifact carries the new grading
+version. For the Week 4 diagnostics rollout, see
+[`WEEK4_GRADE_DIAGNOSTICS.md`](WEEK4_GRADE_DIAGNOSTICS.md).
 
 ## 5. Troubleshooting
 
@@ -121,7 +126,7 @@ pip install) or `nfl_props/version.py` bumped the model version (run a manual
 |---|---|
 | Timer not firing | `systemctl list-timers`; `Persistent=true` replays after downtime |
 | Service red | `systemctl status` + `journalctl -u nfl-props-*.service` |
-| `exit=1` in `logs/nfl_board.log` | env file missing `NFL_DISCORD_WEBHOOK_URL` while board runs `--discord` |
+| `exit=1` in `logs/nfl_forecast.log` | env file missing `NFL_DISCORD_WEBHOOK_URL` while board runs `--discord` |
 | Empty board | `outputs/diagnostics/bovada_coverage_*.json` — fetch metadata vs no games posted |
 | Stale `as_of` mid-season | Tuesday grade task didn't run; check `logs/nfl_grade.log` |
 | `unmatched > 0` on grade | team alias or date drift; stop and fix before trusting grades |
