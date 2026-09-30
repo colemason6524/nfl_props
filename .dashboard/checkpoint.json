@@ -1,0 +1,44 @@
+{
+  "schema_version": 1,
+  "project_id": "nfl_props",
+  "updated_at": "2026-09-30T01:28:00-04:00",
+  "status": "observing",
+  "summary": "Weekly forecast grading diagnostics v2 deployed on Azure (commit 9464d1c); forecast model and policy unchanged. Next weekly JSON artifact will be first production observation of residual, market-reversal, confidence, and edge-band diagnostics.",
+  "experiment": "Weeks 4-8 observation-only; validate forecasting correctness and descriptive reference ROI without tuning model or value thresholds.",
+  "watching_for": "Next grade JSON has nfl-forecast-grading-v2, new diagnostics, zero unexplained unmatched games; keep forecast accuracy separate from correlated captured-price references.",
+  "next_action": "After the Oct 6 weekly grade, verify artifact fields and matching; update WEEKLY_REFLECTIONS.md and assess evidence without production changes.",
+  "deployed": true,
+  "git_commit": "9464d1c",
+  "check_back": {
+    "kind": "grade_event",
+    "label": "after next weekly grade with diagnostics",
+    "target": null,
+    "baseline": "2026-09-30T01:28:00-04:00",
+    "events": [
+      "Weekly grade (sports-nfl-weekly-grade)"
+    ],
+    "target_date": "2026-10-06"
+  },
+  "docs": [
+    {
+      "label": "Next check-in",
+      "path": "docs/NEXT_CHECKIN.md"
+    },
+    {
+      "label": "Handoff",
+      "path": "docs/HANDOFF.md"
+    },
+    {
+      "label": "Operations",
+      "path": "docs/OPERATIONS.md"
+    },
+    {
+      "label": "Week 4 grade diagnostics",
+      "path": "docs/WEEK4_GRADE_DIAGNOSTICS.md"
+    },
+    {
+      "label": "Plan",
+      "path": "docs/PLAN.md"
+    }
+  ]
+}
