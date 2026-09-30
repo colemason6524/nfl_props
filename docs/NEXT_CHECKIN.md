@@ -2,11 +2,12 @@
 
 ## Current check-in — 2026-09-30
 
-- Week 4 grade-diagnostics change is being committed and deployed to the
-  existing Azure VM; verify `git rev-parse HEAD` there matches the approved
-  commit and `git status --short` shows no unexpected modifications.
-- No board/grade timer, forced grade, or Discord post is needed for this
-  grade-schema-only update. No forecast-state rebuild is needed.
+- Week 4 grade-diagnostics commit `385f82d` has been pulled to the existing
+  Azure VM. Verified `git rev-parse HEAD` is `385f82d`; remote working tree is
+  clean, `nfl-forecast-grading-v2` imports, and all 70 unit tests pass remotely.
+- No board/grade timer was manually triggered, no grade was forced, and no
+  Discord post was sent for this grading-only update. No forecast-state rebuild
+  was needed.
 - At the next scheduled weekly grade, verify the weekly JSON has
   `grading_version: nfl-forecast-grading-v2` and the `market_reversals`,
   `confidence_groups`, residual, `reference_forecast_error`, and `edge_bands`

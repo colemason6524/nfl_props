@@ -95,10 +95,12 @@ learnings week-over-week. Copy the template at the top for each new week.
   unchanged. No state rebuild or dependency update is needed.
 - Local verification: `python3 -m unittest tests.test_weekly_grade` (11 tests),
   `python3 -m unittest discover -s tests` (70 tests), and `git diff --check`.
-- Linux deployment is requested; do not mark it deployed until the commit is
-  pulled and the VM repository revision is verified. The diagnostic artifact
-  check is pending the next natural weekly grade; do not force a grade or
-  repost Discord during deployment.
+- Commit `385f82d` (`grade: add weekly forecast diagnostics`) is deployed on
+  the Linux VM. Verified remote `HEAD` is `385f82d`, the remote working tree is
+  clean, grading version imports as `nfl-forecast-grading-v2`, and all 70 unit
+  tests pass on the VM. The diagnostic artifact check is pending the next
+  scheduled weekly grade (timer shows Tue Oct 6); no grade was forced and no
+  Discord message was sent during deployment.
 - This remains an observation-only study through Week 8. No production model,
   action-label, threshold, or policy changes are approved by this diagnostic
   rollout.
