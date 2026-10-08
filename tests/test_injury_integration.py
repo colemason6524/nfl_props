@@ -15,6 +15,10 @@ from unittest import mock
 
 from nfl_props.sources import personnel as personnel_mod
 from nfl_props.sources.personnel import normalize_key_out, personnel_context
+from nfl_props.forecasting import (
+    game_features,
+    resolve_priced_qb_id,
+)
 
 
 def _patch_personnel_path(content):
@@ -94,6 +98,128 @@ class PersonnelSchemaTest(unittest.TestCase):
         self.assertEqual(ctx["qb_status"], "unknown")
         self.assertEqual(ctx["key_out"], [])
         self.assertIsNone(ctx["backup_qb_id"])
+
+
+class _PhaseBState:
+    """Minimal live-forecast state: one rated team (KC) + QB room."""
+
+    @staticmethod
+    def state(qbs, personnel):
+        return {
+            "league": {"pace": 63.0},
+            "teams": {
+                "KC": {"off": 0.10, "def": 0.05, "off_pass": 0.12,
+                       "def_pass": 0.03, "off_rush": 0.02, "def_rush": 0.01,
+                       "pace": 63.0, "last_qb_id": "KC_QB_01"},
+                "DEN": {"off": 0.00, "def": 0.00, "off_pass": 0.00,
+                        "def_pass": 0.00, "off_rush": 0.00, "def_rush": 0.00,
+                        "pace": 63.0, "last_qb_id": "DEN_QB_01"},
+            },
+            "qbs": qbs,
+            "personnel": personnel,
+        }
+
+    @staticmethod
+    def qbs():
+        return {
+            # starter: strong centered EPA.
+            "KC_QB_01": {"epa_c": 0.30, "cpoe": 0.0, "sack_rate": 0.06,
+                         "dropbacks": 300, "games": 10, "last_team": "KC"},
+            # backup: weak centered EPA.
+            "KC_QB_02": {"epa_c": -0.10, "cpoe": 0.0, "sack_rate": 0.06,
+                         "dropbacks": 60, "games": 3, "last_team": "KC"},
+            # third-string: middling EPA, most dropbacks after starter.
+            "KC_QB_03": {"epa_c": 0.05, "cpoe": 0.0, "sack_rate": 0.06,
+                         "dropbacks": 90, "games": 2, "last_team": "KC"},
+            "DEN_QB_01": {"epa_c": 0.10, "cpoe": 0.0, "sack_rate": 0.06,
+                          "dropbacks": 300, "games": 10, "last_team": "DEN"},
+        }
+
+    @staticmethod
+    def game():
+        return {"home_team": "KC", "away_team": "DEN"}
+
+
+class ResolvePricedQbTest(unittest.TestCase):
+    def test_out_starter_prices_backup(self):
+        qbs = _PhaseBState.qbs()
+        personnel = {"KC": {"qb_status": "out",
+                            "backup_qb_id": "KC_QB_02"}}
+        state = _PhaseBState.state(qbs, personnel)
+        feats = game_features(state, _PhaseBState.game())
+        self.assertEqual(feats["priced_qb_h"], "KC_QB_02")
+        self.assertEqual(feats["priced_qb_a"], "DEN_QB_01")
+        # backup value (negative delta), not the strong starter.
+        self.assertLess(feats["qb_epa_h"], 0.0)
+        base = _PhaseBState.state(qbs, {})
+        base_feats = game_features(base, _PhaseBState.game())
+        self.assertGreater(base_feats["qb_epa_h"], 0.0)
+        self.assertNotEqual(feats["qb_epa_h"], base_feats["qb_epa_h"])
+
+    def test_out_without_backup_falls_back_to_next_most_dropbacks(self):
+        qbs = _PhaseBState.qbs()
+        personnel = {"KC": {"qb_status": "out", "backup_qb_id": None}}
+        feats = game_features(_PhaseBState.state(qbs, personnel),
+                              _PhaseBState.game())
+        # KC_QB_03 has the most dropbacks among non-starters.
+        self.assertEqual(feats["priced_qb_h"], "KC_QB_03")
+        self.assertNotEqual(
+            feats["qb_epa_h"],
+            game_features(_PhaseBState.state(qbs, {}),
+                          _PhaseBState.game())["qb_epa_h"])
+
+    def test_out_unknown_backup_ids_fall_back_to_league_average(self):
+        qbs = _PhaseBState.qbs()
+        for personnel in ({"KC": {"qb_status": "out",
+                                  "backup_qb_id": "GHOST_QB"}},
+                          {"KC": {"qb_status": "out",
+                                  "backup_qb_id": "KC_QB_01"}}):
+            feats = game_features(_PhaseBState.state(qbs, personnel),
+                                  _PhaseBState.game())
+            # ghost backup -> next-most-dropbacks teammate prices instead.
+            self.assertEqual(feats["priced_qb_h"], "KC_QB_03")
+        only_starter = {"KC_QB_01": dict(qbs["KC_QB_01"])}
+        feats = game_features(
+            _PhaseBState.state(only_starter,
+                               {"KC": {"qb_status": "out",
+                                       "backup_qb_id": "GHOST_QB"}}),
+            _PhaseBState.game())
+        self.assertIsNone(feats["priced_qb_h"])
+        self.assertEqual(feats["qb_epa_h"], 0.0)
+
+    def test_questionable_keeps_starter(self):
+        qbs = _PhaseBState.qbs()
+        personnel = {"KC": {"qb_status": "questionable",
+                            "backup_qb_id": "KC_QB_02"}}
+        feats = game_features(_PhaseBState.state(qbs, personnel),
+                              _PhaseBState.game())
+        self.assertEqual(feats["priced_qb_h"], "KC_QB_01")
+        self.assertEqual(
+            feats["qb_epa_h"],
+            game_features(_PhaseBState.state(qbs, {}),
+                          _PhaseBState.game())["qb_epa_h"])
+
+    def test_missing_personnel_is_no_regression(self):
+        qbs = _PhaseBState.qbs()
+        plain = game_features(_PhaseBState.state(qbs, {}),
+                              _PhaseBState.game())
+        for state in ({"league": {"pace": 63.0},
+                       "teams": _PhaseBState.state(qbs, {})["teams"],
+                       "qbs": qbs},
+                      _PhaseBState.state(
+                          qbs, {"KC": {"qb_status": "confirmed"}})):
+            feats = game_features(state, _PhaseBState.game())
+            self.assertEqual(feats["priced_qb_h"], "KC_QB_01")
+            self.assertEqual(feats["priced_qb_a"], "DEN_QB_01")
+            self.assertEqual(feats["qb_epa_h"], plain["qb_epa_h"])
+            self.assertEqual(feats["qb_epa_a"], plain["qb_epa_a"])
+
+    def test_resolver_unit_never_returns_out_starter(self):
+        qbs = _PhaseBState.qbs()
+        team_state = {"last_qb_id": "KC_QB_01", "off_pass": 0.12}
+        ctx = {"qb_status": "out", "backup_qb_id": "KC_QB_01"}
+        self.assertEqual(
+            resolve_priced_qb_id("KC", team_state, qbs, ctx), "KC_QB_03")
 
 
 if __name__ == "__main__":

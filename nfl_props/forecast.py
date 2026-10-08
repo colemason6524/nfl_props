@@ -221,7 +221,8 @@ def build_game_forecast(game: dict, state: dict,
         projected_total=round(proj["mu_total"], 1),
         margin_sd=state["margin"].get("resid_sd"),
         total_sd=state["total"].get("resid_sd"),
-        features_used={k: round(v, 4) for k, v in feats.items()})
+        features_used={k: (round(v, 4) if isinstance(v, (int, float))
+                           else v) for k, v in feats.items()})
 
     # Moneyline: side fixed by the winner model.
     p_ml = fc.p_home_win if winner_pick == "home" else fc.p_away_win

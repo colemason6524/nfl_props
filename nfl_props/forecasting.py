@@ -34,6 +34,7 @@ warnings.filterwarnings("ignore", category=RuntimeWarning,
                         message=".*encountered in matmul.*")
 
 from .config import CURRENT_SEASON, FIRST_SEASON, PROCESSED_DIR
+from .sources.personnel import personnel_context
 from .ratings.epa import SEASON_CARRYOVER, carryover_view
 from .ratings.v2 import replay_v2
 from .rivalry import compute_rivalry_frame, live_rivalry_features
@@ -301,6 +302,43 @@ def fit_forecast_models(paired: pd.DataFrame, seasons: Sequence[int],
 # Live feature construction + projection
 # ---------------------------------------------------------------------------
 
+def resolve_priced_qb_id(team: Optional[str], team_state: dict,
+                         qbs: Dict[str, dict],
+                         personnel_ctx: Optional[dict] = None
+                         ) -> Optional[str]:
+    """Which QB id to price for `team` in a live forecast (NFL, Phase B).
+
+    Non-"out" statuses (confirmed/questionable/unknown/missing context)
+    return the incumbent `last_qb_id` unchanged -- questionable stays
+    annotation-only. When the starter is "out": prefer `backup_qb_id` when
+    it carries live dropbacks in `qbs`; else the second-most-dropbacks QB
+    last seen with this team (`last_team` linkage); else None, which prices
+    as league average (`_qb_epa` contributes 0.0 for an unknown QB). The
+    injured starter is never returned when out.
+    """
+    starter_id = team_state.get("last_qb_id")
+    if not personnel_ctx or personnel_ctx.get("qb_status") != "out":
+        return starter_id
+    backup_id = personnel_ctx.get("backup_qb_id")
+    if backup_id and backup_id != starter_id:
+        qb = qbs.get(backup_id)
+        if qb is not None and qb.get("dropbacks", 0) > 0:
+            return backup_id
+    best_id, best_db = None, 0
+    for qid, qb in qbs.items():
+        if qid == starter_id:
+            continue
+        if qb.get("last_team") != team:
+            continue
+        try:
+            db = int(qb.get("dropbacks", 0) or 0)
+        except (TypeError, ValueError):
+            continue
+        if db > best_db:
+            best_id, best_db = qid, db
+    return best_id
+
+
 def _qb_epa(team_state: dict, qbs: Dict[str, dict]) -> float:
     qb_id = team_state.get("last_qb_id")
     qb = qbs.get(qb_id) if qb_id else None
@@ -327,6 +365,13 @@ def game_features(state: dict, game: dict, rivalry: Optional[dict] = None,
     if th is None or ta is None:
         return None
     qbs = state.get("qbs", {})
+    personnel = state.get("personnel")
+    if not isinstance(personnel, dict):
+        personnel = {}
+    th_priced = dict(th, last_qb_id=resolve_priced_qb_id(
+        home, th, qbs, personnel_context(home, cache=personnel)))
+    ta_priced = dict(ta, last_qb_id=resolve_priced_qb_id(
+        away, ta, qbs, personnel_context(away, cache=personnel)))
     league_pace = state.get("league", {}).get("pace", 63.0)
     r = rivalry or {}
     w = weather or {}
@@ -353,8 +398,10 @@ def game_features(state: dict, game: dict, rivalry: Optional[dict] = None,
         "rush_off_a": float(ta.get("off_rush", 0.0)),
         "rush_def_h": float(th.get("def_rush", 0.0)),
         "rush_def_a": float(ta.get("def_rush", 0.0)),
-        "qb_epa_h": _qb_epa(th, qbs),
-        "qb_epa_a": _qb_epa(ta, qbs),
+        "qb_epa_h": _qb_epa(th_priced, qbs),
+        "qb_epa_a": _qb_epa(ta_priced, qbs),
+        "priced_qb_h": th_priced["last_qb_id"],
+        "priced_qb_a": ta_priced["last_qb_id"],
         "h2h_n": float(r.get("h2h_n", 0.0)),
         "h2h_win_rate_h": float(r.get("h2h_win_rate_h", 0.5)),
         "temp_f": float(w.get("temp_f", 70.0) or 70.0),
@@ -445,6 +492,7 @@ def rebuild_forecast_state(
                       for k, v in q.items()}
                 for qid, q in replay_state["qbs"].items()},
         "personnel_available": bool(personnel),
+        "personnel": personnel,
         **fit,
     }
     PROCESSED_DIR.mkdir(parents=True, exist_ok=True)
