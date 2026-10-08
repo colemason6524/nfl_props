@@ -222,5 +222,180 @@ class ResolvePricedQbTest(unittest.TestCase):
             resolve_priced_qb_id("KC", team_state, qbs, ctx), "KC_QB_03")
 
 
+class InjuryDebitTest(unittest.TestCase):
+    """Phase C: conservative team-side injury debit (NFL only)."""
+
+    def test_no_outs_zero_debit(self):
+        from nfl_props.injury_debit import team_injury_debit
+        for ctx in (None, {}, {"qb_status": "unknown", "key_out": []},
+                    {"qb_status": "confirmed", "key_out": []},
+                    {"qb_status": "confirmed",
+                     "key_out": [{"position": "K", "player_id": None}]},
+                    {"qb_status": "questionable",
+                     "key_out": [{"position": "WR1",
+                                  "player_id": None}]}):
+            debit, attr = team_injury_debit(ctx, False)
+            self.assertEqual(debit, 0.0)
+            self.assertEqual(attr, [])
+
+    def test_questionable_never_debits(self):
+        from nfl_props.injury_debit import team_injury_debit
+        ctx = {"qb_status": "questionable",
+               "key_out": [{"position": "WR1", "player_id": None},
+                           {"position": "RB1", "player_id": None}]}
+        self.assertEqual(team_injury_debit(ctx, False), (0.0, []))
+        self.assertEqual(team_injury_debit(ctx, True), (0.0, []))
+        qctx = {"qb_status": "questionable", "key_out": []}
+        self.assertEqual(team_injury_debit(qctx, True), (0.0, []))
+
+    def test_one_out_wr1_small_debit(self):
+        from nfl_props.injury_debit import team_injury_debit
+        ctx = {"qb_status": "confirmed",
+               "key_out": [{"position": "WR1", "player_id": None}]}
+        debit, attr = team_injury_debit(ctx, False)
+        self.assertAlmostEqual(debit, -0.4)
+        self.assertEqual(len(attr), 1)
+        self.assertEqual(attr[0]["position"], "WR1")
+        self.assertAlmostEqual(attr[0]["raw"], -0.8)
+        self.assertAlmostEqual(attr[0]["applied"], -0.4)
+
+    def test_out_qb_residual_debit_within_cap(self):
+        from nfl_props.injury_debit import team_injury_debit
+        ctx = {"qb_status": "out", "key_out": []}
+        # No substitution (starter still priced) -> no residual gap.
+        self.assertEqual(team_injury_debit(ctx, False), (0.0, []))
+        debit, attr = team_injury_debit(ctx, True)
+        self.assertAlmostEqual(debit, -1.0)
+        self.assertEqual(len(attr), 1)
+        self.assertEqual(attr[0]["position"], "QB")
+        self.assertGreaterEqual(debit, -3.0 * 0.5)
+        # key_out QB entries never double-count the residual.
+        dup = {"qb_status": "out",
+               "key_out": [{"position": "QB", "player_id": None}]}
+        debit2, attr2 = team_injury_debit(dup, True)
+        self.assertAlmostEqual(debit2, -1.0)
+        self.assertEqual(len(attr2), 1)
+
+    def test_position_table_caps_and_factor(self):
+        from nfl_props.injury_debit import team_injury_debit
+        ctx = {"qb_status": "confirmed",
+               "key_out": [{"position": "RB1", "player_id": None}]}
+        debit, _ = team_injury_debit(ctx, False)
+        self.assertAlmostEqual(debit, -0.3)
+        # OL group caps at -1.0 raw -> -0.5 factored.
+        ctx = {"qb_status": "confirmed",
+               "key_out": [{"position": p, "player_id": None}
+                           for p in ("LT", "RT", "C", "RG", "LG")]}
+        debit, attr = team_injury_debit(ctx, False)
+        self.assertAlmostEqual(debit, -0.5)
+        self.assertEqual(len(attr), 5)
+        # DEF group caps at -0.6 raw -> -0.3 factored.
+        ctx = {"qb_status": "confirmed",
+               "key_out": [{"position": p, "player_id": None}
+                           for p in ("LB", "CB", "S", "DE", "DT")]}
+        debit, _ = team_injury_debit(ctx, False)
+        self.assertAlmostEqual(debit, -0.3)
+        # Case-insensitive prefix match.
+        ctx = {"qb_status": "confirmed",
+               "key_out": [{"position": "wr1", "player_id": None}]}
+        debit, _ = team_injury_debit(ctx, False)
+        self.assertAlmostEqual(debit, -0.4)
+
+    def test_multi_out_clamps_at_floor(self):
+        from nfl_props.injury_debit import team_injury_debit
+        key_out = ([{"position": "WR1", "player_id": None},
+                    {"position": "WR2", "player_id": None},
+                    {"position": "RB1", "player_id": None}]
+                   + [{"position": p, "player_id": None}
+                      for p in ("LT", "RT", "C", "LG")]
+                   + [{"position": p, "player_id": None}
+                      for p in ("LB", "CB", "S", "DE")])
+        ctx = {"qb_status": "out", "key_out": key_out}
+        debit, attr = team_injury_debit(ctx, True)
+        # QB -1.0 + WR -0.8 + RB -0.3 + OL-capped -0.5 + DEF-capped -0.3.
+        self.assertAlmostEqual(debit, -2.9)
+        self.assertTrue(len(attr) > 1)
+        # Extreme outs clamp at the -4.0 floor (conservative hard cap).
+        flood = {"qb_status": "out",
+                 "key_out": [{"position": f"WR{i}", "player_id": None}
+                             for i in range(10)]}
+        debit_flood, _ = team_injury_debit(flood, True)
+        self.assertAlmostEqual(debit_flood, -4.0)
+
+
+class ForecastDebitWiringTest(unittest.TestCase):
+    """Phase C wiring: debits shift margin/total via build_game_forecast."""
+
+    def _forecast_state(self, personnel):
+        import sys
+        sys.path.insert(0, "tests")
+        from test_forecast import _fake_state
+        state = _fake_state()
+        state["personnel_available"] = bool(personnel)
+        state["personnel"] = personnel or {}
+        return state
+
+    def _game(self):
+        import sys
+        sys.path.insert(0, "tests")
+        from test_forecast import _game
+        return _game()
+
+    def test_no_outs_projections_unchanged(self):
+        from nfl_props.forecast import build_game_forecast
+        clean = self._forecast_state({})
+        base = build_game_forecast(self._game(), clean)
+        for personnel in (
+                {},
+                {"HOM": {"qb_status": "confirmed", "key_out": [],
+                         "backup_qb_id": None, "updated_at": "t",
+                         "source": "manual"}},
+                {"HOM": {"qb_status": "questionable",
+                         "key_out": [{"position": "WR1",
+                                      "player_id": None}],
+                         "backup_qb_id": None, "updated_at": "t",
+                         "source": "manual"}}):
+            fc = build_game_forecast(self._game(),
+                                     self._forecast_state(personnel))
+            self.assertEqual(fc.projected_margin, base.projected_margin)
+            self.assertEqual(fc.projected_total, base.projected_total)
+            self.assertFalse([n for n in fc.notes
+                              if "injury debit" in n])
+
+    def test_home_wr1_out_shifts_margin_and_total(self):
+        from nfl_props.forecast import build_game_forecast
+        base = build_game_forecast(self._game(), self._forecast_state({}))
+        personnel = {"HOM": {"qb_status": "confirmed",
+                             "key_out": [{"position": "WR1",
+                                          "player_id": None}],
+                             "backup_qb_id": None, "updated_at": "t",
+                             "source": "manual"}}
+        fc = build_game_forecast(self._game(),
+                                 self._forecast_state(personnel))
+        self.assertAlmostEqual(
+            fc.projected_margin, base.projected_margin - 0.4, places=1)
+        self.assertAlmostEqual(
+            fc.projected_total, base.projected_total - 0.4, places=1)
+        self.assertTrue(any("HOM injury debit -0.4" in n
+                            for n in fc.notes))
+
+    def test_away_out_improves_home_margin(self):
+        from nfl_props.forecast import build_game_forecast
+        base = build_game_forecast(self._game(), self._forecast_state({}))
+        personnel = {"AWY": {"qb_status": "confirmed",
+                             "key_out": [{"position": "RB1",
+                                          "player_id": None}],
+                             "backup_qb_id": None, "updated_at": "t",
+                             "source": "manual"}}
+        fc = build_game_forecast(self._game(),
+                                 self._forecast_state(personnel))
+        self.assertAlmostEqual(
+            fc.projected_margin, base.projected_margin + 0.3, places=1)
+        self.assertAlmostEqual(
+            fc.projected_total, base.projected_total - 0.3, places=1)
+        self.assertTrue(any("AWY injury debit -0.3" in n
+                            for n in fc.notes))
+
+
 if __name__ == "__main__":
     unittest.main()

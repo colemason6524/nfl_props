@@ -11,9 +11,12 @@ from __future__ import annotations
 from dataclasses import asdict, dataclass, field
 from typing import Dict, List, Optional
 
+import sys
+
 import numpy as np
 
 from .forecasting import game_features, project
+from .injury_debit import team_injury_debit
 from .ratings.epa import game_total_probs, spread_probs
 from .references import (BOVADA, POLYMARKET, ForecastReference,
                          build_reference)
@@ -204,7 +207,41 @@ def build_game_forecast(game: dict, state: dict,
         fc.notes.append("insufficient ratings; no forecast")
         return fc
 
+    notes_pending: list = []
     proj = project(state, feats)
+
+    # Phase C: conservative team-side injury debit. Each debit (<= 0)
+    # trims that team's own scoring, so mu_margin (home-away) shifts by
+    # (home_debit - away_debit) and mu_total shifts by their sum.
+    # Mutating proj here carries the adjustment into the spread/total
+    # probability inputs below. p_home_win is left untouched: the winner
+    # model already sees the QB substitution via features.
+    home_debit, away_debit = 0.0, 0.0
+    if state.get("personnel_available"):
+        from .sources.personnel import personnel_context
+        personnel = state.get("personnel")
+        if not isinstance(personnel, dict):
+            personnel = {}
+        teams_state = state.get("teams", {})
+        th = teams_state.get(home) or {}
+        ta = teams_state.get(away) or {}
+        for team, starter, priced, slot in (
+                (home, th.get("last_qb_id"), feats.get("priced_qb_h"), "h"),
+                (away, ta.get("last_qb_id"), feats.get("priced_qb_a"), "a")):
+            ctx = personnel_context(team, cache=personnel)
+            substituted = (ctx.get("qb_status") == "out"
+                           and priced is not None and priced != starter)
+            debit, attribution = team_injury_debit(
+                ctx, priced_qb_substituted=substituted)
+            if slot == "h":
+                home_debit = debit
+            else:
+                away_debit = debit
+            if debit:
+                notes_pending.append(
+                    (team, f"{team} injury debit {debit:.1f}", attribution))
+    proj["mu_margin"] = proj["mu_margin"] + (home_debit - away_debit)
+    proj["mu_total"] = proj["mu_total"] + (home_debit + away_debit)
     p_home = proj["p_home_win"]
     winner_pick = "home" if p_home >= 0.5 else "away"
     rm = np.asarray(state["margin"]["resid"], dtype=float)
@@ -276,4 +313,10 @@ def build_game_forecast(game: dict, state: dict,
             ctx = personnel_context(team)
             if ctx.get("qb_status") in ("out", "questionable"):
                 fc.notes.append(f"{team} QB {ctx['qb_status']}")
+    # Phase C carry-forward for Phase D structured fields (dataclass
+    # untouched): stash each debit as a notes line + a pipeline log line.
+    for team, note, attribution in notes_pending:
+        fc.notes.append(note)
+        print(f"[pipeline] injury debit {fc.forecast_id} {note} "
+              f"{attribution}", file=sys.stderr, flush=True)
     return fc
