@@ -39,6 +39,13 @@ case "$TASK" in
         COMMAND=(bash -c 'grade_exit=0; "$1" grade_forecast.py || grade_exit=$?; "$1" -m nfl_props.cli refresh-data && "$1" -m nfl_props.cli build && "$1" -m nfl_props.cli rebuild-state && "$1" -m nfl_props.cli rebuild-state-v2 && "$1" -m nfl_props.cli rebuild-forecast-state; refresh_exit=$?; if (( grade_exit != 0 )); then exit "$grade_exit"; fi; exit "$refresh_exit"' _ "$PYTHON_EXE")
         REQUIRED_SECRET=
         ;;
+    pregame-refresh)
+        LOG_FILE="$LOG_DIR/nfl_pregame_refresh.log"
+        TIMEOUT=45m
+        # Late-pregame injury pull + board regen in ONE process (Sun 09:30 ET).
+        COMMAND=("$PYTHON_EXE" scripts/pregame_refresh.py --discord)
+        REQUIRED_SECRET=NFL_DISCORD_WEBHOOK_URL
+        ;;
     weekly-grade)
         LOG_FILE="$LOG_DIR/nfl_weekly_grade.log"
         TIMEOUT=30m

@@ -522,3 +522,80 @@ class ObservabilityFieldsTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class PregameRegressionTest(unittest.TestCase):
+    """Late-pregame guarantees: questionable-IN, QB-out backup re-price."""
+
+    def _forecast_state(self, personnel):
+        import sys
+        sys.path.insert(0, "tests")
+        from test_forecast import _fake_state
+        state = _fake_state()
+        state["personnel_available"] = bool(personnel)
+        state["personnel"] = personnel or {}
+        return state
+
+    def _game(self):
+        import sys
+        sys.path.insert(0, "tests")
+        from test_forecast import _game
+        return _game()
+
+    def _qb_state(self, personnel):
+        state = self._forecast_state(personnel)
+        state["teams"]["HOM"]["last_qb_id"] = "HOM_QB_01"
+        state["teams"]["AWY"]["last_qb_id"] = "AWY_QB_01"
+        state["qbs"] = {
+            "HOM_QB_01": {"epa_c": 0.30, "cpoe": 0.0, "sack_rate": 0.06,
+                          "dropbacks": 300, "games": 10,
+                          "last_team": "HOM"},
+            "HOM_QB_02": {"epa_c": -0.10, "cpoe": 0.0, "sack_rate": 0.06,
+                          "dropbacks": 60, "games": 3, "last_team": "HOM"},
+            "AWY_QB_01": {"epa_c": 0.10, "cpoe": 0.0, "sack_rate": 0.06,
+                          "dropbacks": 300, "games": 10,
+                          "last_team": "AWY"},
+        }
+        return state
+
+    def test_questionable_qb_is_in_zero_debit(self):
+        """Questionable QB: starter still priced, zero debit, note only."""
+        from nfl_props.forecast import build_game_forecast
+        from nfl_props.injury_debit import team_injury_debit
+        base = build_game_forecast(self._game(),
+                                   self._qb_state({}))
+        personnel = {"HOM": {"qb_status": "questionable",
+                             "key_out": [{"position": "WR1",
+                                          "player_id": None}],
+                             "backup_qb_id": "HOM_QB_02"}}
+        fc = build_game_forecast(self._game(), self._qb_state(personnel))
+        self.assertEqual(fc.priced_qb_home, "HOM_QB_01")
+        self.assertFalse(fc.qb_substituted_home)
+        self.assertEqual(fc.injury_debit_pts_home, 0.0)
+        self.assertEqual(fc.projected_margin, base.projected_margin)
+        self.assertEqual(fc.projected_total, base.projected_total)
+        self.assertTrue(any("HOM QB questionable" in n for n in fc.notes))
+        # Unit level: questionable never debits, even flagged substituted.
+        ctx = {"qb_status": "questionable",
+               "key_out": [{"position": "WR1", "player_id": None}]}
+        self.assertEqual(team_injury_debit(ctx, False), (0.0, []))
+        self.assertEqual(team_injury_debit(ctx, True), (0.0, []))
+
+    def test_qb_out_backup_repriced(self):
+        """QB-out: backup priced, substitution flagged, residual debited."""
+        from nfl_props.forecast import build_game_forecast
+        base = build_game_forecast(self._game(), self._qb_state({}))
+        personnel = {"HOM": {"qb_status": "out",
+                             "backup_qb_id": "HOM_QB_02"}}
+        fc = build_game_forecast(self._game(), self._qb_state(personnel))
+        self.assertEqual(fc.priced_qb_home, "HOM_QB_02")
+        self.assertTrue(fc.qb_substituted_home)
+        self.assertAlmostEqual(fc.injury_debit_pts_home, -1.0)
+        # Backup is worse than the starter: margin and total both fall.
+        self.assertLess(fc.projected_margin, base.projected_margin)
+        self.assertLess(fc.projected_total, base.projected_total)
+        self.assertTrue(any("HOM QB out" in n for n in fc.notes))
+        self.assertTrue(any("HOM injury debit -1.0" in n
+                            for n in fc.notes))
+
+
