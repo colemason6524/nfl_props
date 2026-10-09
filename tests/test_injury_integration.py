@@ -397,5 +397,128 @@ class ForecastDebitWiringTest(unittest.TestCase):
                             for n in fc.notes))
 
 
+class ObservabilityFieldsTest(unittest.TestCase):
+    """Phase D: structured injury observability on GameForecast (NFL)."""
+
+    def _forecast_state(self, personnel):
+        import sys
+        sys.path.insert(0, "tests")
+        from test_forecast import _fake_state
+        state = _fake_state()
+        state["personnel_available"] = bool(personnel)
+        state["personnel"] = personnel or {}
+        return state
+
+    def _game(self):
+        import sys
+        sys.path.insert(0, "tests")
+        from test_forecast import _game
+        return _game()
+
+    def _hom_wr1_out(self):
+        return {"HOM": {"qb_status": "confirmed",
+                        "key_out": [{"position": "WR1",
+                                     "player_id": None}],
+                        "backup_qb_id": None, "updated_at": "t",
+                        "source": "manual"}}
+
+    def test_healthy_slate_defaults(self):
+        from nfl_props.forecast import build_game_forecast
+        fc = build_game_forecast(self._game(), self._forecast_state({}))
+        self.assertEqual(fc.injury_debit_pts_home, 0.0)
+        self.assertEqual(fc.injury_debit_pts_away, 0.0)
+        self.assertEqual(fc.injury_trace, [])
+        self.assertIsNone(fc.priced_qb_home)
+        self.assertIsNone(fc.priced_qb_away)
+        self.assertFalse(fc.qb_substituted_home)
+        self.assertFalse(fc.qb_substituted_away)
+        d = fc.as_dict()
+        for key in ("injury_debit_pts_home", "injury_debit_pts_away",
+                    "injury_trace", "priced_qb_home", "priced_qb_away",
+                    "qb_substituted_home", "qb_substituted_away"):
+            self.assertIn(key, d)
+
+    def test_debit_populates_fields_and_notes(self):
+        from nfl_props.forecast import build_game_forecast
+        fc = build_game_forecast(self._game(),
+                                 self._forecast_state(self._hom_wr1_out()))
+        self.assertAlmostEqual(fc.injury_debit_pts_home, -0.4)
+        self.assertEqual(fc.injury_debit_pts_away, 0.0)
+        self.assertEqual(len(fc.injury_trace), 1)
+        entry = fc.injury_trace[0]
+        self.assertEqual(entry["team"], "HOM")
+        self.assertAlmostEqual(entry["debit_pts"], -0.4)
+        self.assertTrue(any("HOM injury debit -0.4" in n
+                            for n in fc.notes))
+        self.assertTrue(any("priced QB" in n and "substituted=False" in n
+                            for n in fc.notes))
+
+    def test_priced_qb_ids_recorded(self):
+        from nfl_props.forecast import build_game_forecast
+        state = self._forecast_state(self._hom_wr1_out())
+        state["teams"]["HOM"]["last_qb_id"] = "HOM_QB_01"
+        state["teams"]["AWY"]["last_qb_id"] = "AWY_QB_01"
+        fc = build_game_forecast(self._game(), state)
+        self.assertEqual(fc.priced_qb_home, "HOM_QB_01")
+        self.assertEqual(fc.priced_qb_away, "AWY_QB_01")
+        self.assertFalse(fc.qb_substituted_home)
+        self.assertFalse(fc.qb_substituted_away)
+
+    def test_as_dict_round_trip(self):
+        from nfl_props.forecast import GameForecast, build_game_forecast
+        from nfl_props.references import ForecastReference
+        fc = build_game_forecast(self._game(),
+                                 self._forecast_state(self._hom_wr1_out()))
+        d = fc.as_dict()
+        d["references"] = [ForecastReference(**r)
+                           for r in d["references"]]
+        fc2 = GameForecast(**d)
+        self.assertEqual(fc2, fc)
+
+    def test_state_personnel_wins_over_disk(self):
+        import json
+        from nfl_props.forecast import build_game_forecast
+        disk = {"AWY": {"qb_status": "out",
+                        "key_out": [{"position": "WR1",
+                                     "player_id": None}],
+                        "backup_qb_id": None, "updated_at": "t",
+                        "source": "manual"}}
+        patcher = _patch_personnel_path(json.dumps(disk))
+        patcher.start()
+        try:
+            base = build_game_forecast(self._game(),
+                                       self._forecast_state({}))
+            fc = build_game_forecast(
+                self._game(), self._forecast_state(self._hom_wr1_out()))
+        finally:
+            patcher.stop()
+            patcher._tmpdir.cleanup()
+        # State (HOM WR1 out) respected; disagreeing on-disk (AWY out)
+        # cache ignored by both the debit block and the QB-status notes.
+        self.assertAlmostEqual(
+            fc.projected_margin, base.projected_margin - 0.4, places=1)
+        self.assertAlmostEqual(fc.injury_debit_pts_home, -0.4)
+        self.assertEqual(fc.injury_debit_pts_away, 0.0)
+        self.assertFalse(any("AWY QB out" in n for n in fc.notes))
+        self.assertFalse(any("AWY injury debit" in n for n in fc.notes))
+
+    def test_no_disk_file_needed(self):
+        from nfl_props.forecast import build_game_forecast
+        patcher = _patch_personnel_path(None)  # PERSONNEL_PATH missing
+        patcher.start()
+        try:
+            fc = build_game_forecast(
+                self._game(), self._forecast_state(self._hom_wr1_out()))
+            bare = self._forecast_state({})
+            del bare["personnel"]
+            fc0 = build_game_forecast(self._game(), bare)
+        finally:
+            patcher.stop()
+            patcher._tmpdir.cleanup()
+        self.assertAlmostEqual(fc.injury_debit_pts_home, -0.4)
+        self.assertEqual(fc0.injury_debit_pts_home, 0.0)
+        self.assertEqual(fc0.injury_trace, [])
+
+
 if __name__ == "__main__":
     unittest.main()

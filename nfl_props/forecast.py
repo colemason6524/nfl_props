@@ -74,6 +74,16 @@ class GameForecast:
     features_used: Dict[str, float] = field(default_factory=dict)
     references: List[ForecastReference] = field(default_factory=list)
     notes: List[str] = field(default_factory=list)
+    # Phase D observability: structured injury-debit fields. Safe
+    # defaults keep old constructions (incl. the available=False early
+    # returns below) working unchanged.
+    injury_debit_pts_home: float = 0.0
+    injury_debit_pts_away: float = 0.0
+    injury_trace: List[dict] = field(default_factory=list)
+    priced_qb_home: Optional[str] = None
+    priced_qb_away: Optional[str] = None
+    qb_substituted_home: bool = False
+    qb_substituted_away: bool = False
 
     def as_dict(self) -> dict:
         d = asdict(self)
@@ -217,17 +227,31 @@ def build_game_forecast(game: dict, state: dict,
     # probability inputs below. p_home_win is left untouched: the winner
     # model already sees the QB substitution via features.
     home_debit, away_debit = 0.0, 0.0
-    if state.get("personnel_available"):
-        from .sources.personnel import personnel_context
-        personnel = state.get("personnel")
+    # Phase D: unify personnel sourcing with game_features -- prefer the
+    # state["personnel"] snapshot, falling back to the on-disk cache only
+    # when the state carries none. Fail-open throughout.
+    personnel = state.get("personnel")
+    if not isinstance(personnel, dict):
+        try:
+            from .sources.personnel import load_personnel
+            personnel = load_personnel()
+        except Exception:
+            personnel = {}
         if not isinstance(personnel, dict):
             personnel = {}
+    # Priced QB ids ride along from Phase B features (no extra I/O).
+    priced_qb_h = feats.get("priced_qb_h")
+    priced_qb_a = feats.get("priced_qb_a")
+    qb_sub_h, qb_sub_a = False, False
+    trace: list = []
+    if state.get("personnel_available"):
+        from .sources.personnel import personnel_context
         teams_state = state.get("teams", {})
         th = teams_state.get(home) or {}
         ta = teams_state.get(away) or {}
         for team, starter, priced, slot in (
-                (home, th.get("last_qb_id"), feats.get("priced_qb_h"), "h"),
-                (away, ta.get("last_qb_id"), feats.get("priced_qb_a"), "a")):
+                (home, th.get("last_qb_id"), priced_qb_h, "h"),
+                (away, ta.get("last_qb_id"), priced_qb_a, "a")):
             ctx = personnel_context(team, cache=personnel)
             substituted = (ctx.get("qb_status") == "out"
                            and priced is not None and priced != starter)
@@ -235,11 +259,22 @@ def build_game_forecast(game: dict, state: dict,
                 ctx, priced_qb_substituted=substituted)
             if slot == "h":
                 home_debit = debit
+                qb_sub_h = substituted
             else:
                 away_debit = debit
-            if debit:
+                qb_sub_a = substituted
+            if debit or substituted:
                 notes_pending.append(
-                    (team, f"{team} injury debit {debit:.1f}", attribution))
+                    (team, priced, substituted,
+                     f"{team} injury debit {debit:.1f} "
+                     f"(priced QB {priced or 'none'}; "
+                     f"substituted={substituted})",
+                     attribution))
+                trace.append({"team": team, "slot": slot,
+                              "debit_pts": debit,
+                              "attribution": attribution,
+                              "priced_qb": priced,
+                              "qb_substituted": substituted})
     proj["mu_margin"] = proj["mu_margin"] + (home_debit - away_debit)
     proj["mu_total"] = proj["mu_total"] + (home_debit + away_debit)
     p_home = proj["p_home_win"]
@@ -259,7 +294,14 @@ def build_game_forecast(game: dict, state: dict,
         margin_sd=state["margin"].get("resid_sd"),
         total_sd=state["total"].get("resid_sd"),
         features_used={k: (round(v, 4) if isinstance(v, (int, float))
-                           else v) for k, v in feats.items()})
+                           else v) for k, v in feats.items()},
+        injury_debit_pts_home=home_debit,
+        injury_debit_pts_away=away_debit,
+        injury_trace=trace,
+        priced_qb_home=priced_qb_h,
+        priced_qb_away=priced_qb_a,
+        qb_substituted_home=qb_sub_h,
+        qb_substituted_away=qb_sub_a)
 
     # Moneyline: side fixed by the winner model.
     p_ml = fc.p_home_win if winner_pick == "home" else fc.p_away_win
@@ -310,12 +352,12 @@ def build_game_forecast(game: dict, state: dict,
     if state.get("personnel_available"):
         from .sources.personnel import personnel_context
         for team in (home, away):
-            ctx = personnel_context(team)
+            ctx = personnel_context(team, cache=personnel)
             if ctx.get("qb_status") in ("out", "questionable"):
                 fc.notes.append(f"{team} QB {ctx['qb_status']}")
-    # Phase C carry-forward for Phase D structured fields (dataclass
-    # untouched): stash each debit as a notes line + a pipeline log line.
-    for team, note, attribution in notes_pending:
+    # Phase D: structured observability fields are set at construction;
+    # keep the notes line + pipeline log line for human-readable output.
+    for team, _priced, _substituted, note, attribution in notes_pending:
         fc.notes.append(note)
         print(f"[pipeline] injury debit {fc.forecast_id} {note} "
               f"{attribution}", file=sys.stderr, flush=True)
