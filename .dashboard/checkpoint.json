@@ -1,22 +1,20 @@
 {
   "schema_version": 1,
   "project_id": "nfl_props",
-  "updated_at": "2026-10-08T23:59:39+00:00",
-  "status": "observing",
-  "summary": "INJURY INTEGRATION DEPLOYED (7de1669, pushed): phase A personnel schema + manual update script + injury integration tests; phase B QB backup substitution in live forecast features; phase C conservative team-side injury debit in live forecasts (WNBA pattern, 2025 data dampened). 21 injury tests pass. Awaiting the next weekly grade to verify live impact.",
+  "updated_at": "2026-10-09T00:11:20+00:00",
+  "status": "idle",
+  "summary": "Phases A-E landed and pushed (118c1c9): personnel fail-open, QB backup substitution, conservative team debit, observability fields, 100 tests green",
   "experiment": null,
   "watching_for": null,
   "next_action": null,
   "deployed": true,
-  "git_commit": "7de1669",
+  "git_commit": "118c1c9",
   "check_back": {
     "kind": "grade_event",
-    "label": "after the next weekly NFL grade (verify injury-integration impact)",
+    "label": "injury integration shipped",
     "target": null,
-    "baseline": "2026-10-08T23:59:39+00:00",
-    "events": [
-      "Weekly grade (sports-nfl-weekly-grade)"
-    ],
+    "baseline": "2026-10-09T00:11:20+00:00",
+    "events": [],
     "target_date": null
   },
   "docs": [
