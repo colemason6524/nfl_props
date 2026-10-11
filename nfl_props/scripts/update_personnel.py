@@ -11,11 +11,14 @@ Usage:
     python -m nfl_props.scripts.update_personnel --team KC \\
         --qb-status questionable --key-out WR1 --key-out WR2 \\
         --backup-qb-id KC_BACKUP_01 --source manual
+    python -m nfl_props.scripts.update_personnel --team WAS \\
+        --qb-status confirmed --starter-qb-id 00-0039910 --source manual
     printf 'KC,confirmed\\nBUF,questionable\\n' | \\
         python -m nfl_props.scripts.update_personnel --table - --source manual
 
 `--table` accepts a CSV file (or `-` for stdin) with rows
-`TEAM,qb_status[,backup_qb_id]`; other fields come from the flags.
+`TEAM,qb_status[,backup_qb_id[,starter_qb_id]]`; other fields come from
+the flags.
 """
 from __future__ import annotations
 
@@ -48,6 +51,9 @@ def parse_args(argv=None) -> argparse.Namespace:
                         help="Key-out position; repeatable (e.g. --key-out WR1)")
     parser.add_argument("--backup-qb-id", default=None,
                         help="Backup QB id (default: None)")
+    parser.add_argument("--starter-qb-id", default=None,
+                        help="Starter QB id override for returning starters "
+                             "(default: None)")
     parser.add_argument("--source", default="manual",
                         help="Source label (default: manual)")
     parser.add_argument("--table",
@@ -59,7 +65,7 @@ def parse_args(argv=None) -> argparse.Namespace:
 
 
 def read_rows(args: argparse.Namespace):
-    """Yield (team, qb_status, backup_qb_id) rows from flags and/or --table."""
+    """Yield (team, qb_status, backup_qb_id, starter_qb_id) rows."""
     rows = []
     if args.table:
         handle = sys.stdin if args.table == "-" else open(args.table, newline="",
@@ -77,16 +83,20 @@ def read_rows(args: argparse.Namespace):
                         f"error: invalid qb_status {qb_status!r}; "
                         f"expected one of {VALID_QB_STATUSES}")
                 backup = row[2].strip() if len(row) > 2 and row[2].strip() else None
-                rows.append((team, qb_status, backup))
+                starter = row[3].strip() if len(row) > 3 and row[3].strip() \
+                    else args.starter_qb_id
+                rows.append((team, qb_status, backup, starter))
     elif args.team:
-        rows.append((args.team.strip().upper(), args.qb_status, args.backup_qb_id))
+        rows.append((args.team.strip().upper(), args.qb_status,
+                     args.backup_qb_id, args.starter_qb_id))
     else:
         raise SystemExit("pass --team TEAM or --table FILE")
     return rows
 
 
 def upsert(cache: dict, team: str, qb_status: str,
-           key_out: list, backup_qb_id, source: str) -> dict:
+           key_out: list, backup_qb_id, source: str,
+           starter_qb_id=None) -> dict:
     if qb_status not in VALID_QB_STATUSES:
         raise ValueError(f"invalid qb_status {qb_status!r}; "
                          f"expected one of {VALID_QB_STATUSES}")
@@ -102,6 +112,10 @@ def upsert(cache: dict, team: str, qb_status: str,
         base["backup_qb_id"] = backup_qb_id
     elif "backup_qb_id" not in base:
         base["backup_qb_id"] = None
+    if starter_qb_id is not None:
+        base["starter_qb_id"] = starter_qb_id
+    elif "starter_qb_id" not in base:
+        base["starter_qb_id"] = None
     base["updated_at"] = datetime.now(timezone.utc).isoformat()
     base["source"] = source
     cache[team] = base
@@ -136,10 +150,11 @@ def main(argv=None) -> int:
             cache = {}
     except (OSError, json.JSONDecodeError):
         cache = {}
-    for team, qb_status, backup in rows:
+    for team, qb_status, backup, starter in rows:
         key_out = args.key_out
         try:
-            cache = upsert(cache, team, qb_status, key_out, backup, args.source)
+            cache = upsert(cache, team, qb_status, key_out, backup,
+                           args.source, starter)
         except ValueError as exc:
             print(f"error: {exc}", file=sys.stderr)
             return 2

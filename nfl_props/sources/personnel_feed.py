@@ -82,6 +82,7 @@ def _map_position(abbrev: object) -> Optional[str]:
 
 def _empty_team(source: str, stamp: str) -> dict:
     return {"qb_status": "unknown", "key_out": [], "backup_qb_id": None,
+            "starter_qb_id": None,
             "updated_at": stamp, "source": source}
 
 
@@ -254,7 +255,22 @@ def fetch_and_store(now: Optional[datetime] = None,
     if not teams:
         raise PersonnelFeedError("degenerate zero-team payload; "
                                  "cache untouched")
-    for entry in teams.values():
+    # Merge-preserve manual QB id overrides: the feed has no depth-chart
+    # source, so a previously set `backup_qb_id` / `starter_qb_id` must
+    # survive a refresh (e.g. WAS/Daniels starter, BAL/Huntley backup).
+    try:
+        existing = json.loads(PERSONNEL_PATH.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, OSError):
+        existing = {}
+    if not isinstance(existing, dict):
+        existing = {}
+    for abbr, entry in teams.items():
+        prev = existing.get(abbr)
+        if isinstance(prev, dict):
+            for key in ("backup_qb_id", "starter_qb_id"):
+                if prev.get(key) is not None:
+                    entry[key] = prev[key]
+        entry.setdefault("starter_qb_id", None)
         entry["source"] = source
         entry["updated_at"] = now.isoformat()
     _atomic_write_json(PERSONNEL_PATH, teams)

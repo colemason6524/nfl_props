@@ -34,7 +34,22 @@ PERSONNEL_RAW_DIR = RAW_DIR / "personnel"
 VALID_QB_STATUSES = ("confirmed", "questionable", "out", "unknown")
 
 NEUTRAL = {"qb_status": "unknown", "key_out": [], "updated_at": None,
-           "source": None, "backup_qb_id": None}
+           "source": None, "backup_qb_id": None, "starter_qb_id": None}
+
+# Team abbreviation aliases: model uses WAS/LA, ESPN feed uses WSH/LAR
+TEAM_ALIASES = {
+    "WAS": "WSH",
+    "WSH": "WSH",
+    "LA": "LAR",
+    "LAR": "LAR",
+}
+
+
+def normalize_team(team: Optional[str]) -> Optional[str]:
+    """Map team abbreviation to canonical personnel.json key."""
+    if not team:
+        return team
+    return TEAM_ALIASES.get(team.upper(), team.upper())
 
 
 def normalize_key_out(entries) -> List[dict]:
@@ -81,6 +96,7 @@ def personnel_context(team: Optional[str],
     data = cache if cache is not None else load_personnel()
     ctx = {k: (list(v) if isinstance(v, list) else v)
            for k, v in NEUTRAL.items()}
+    team = normalize_team(team)
     if team and team in data and isinstance(data[team], dict):
         for key in NEUTRAL:
             if key in data[team]:

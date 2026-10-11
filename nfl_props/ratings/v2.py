@@ -73,7 +73,8 @@ def _blank_team() -> dict:
 
 def _blank_qb() -> dict:
     return {"epa_c": 0.0, "cpoe": 0.0, "sack_rate": 0.06,
-            "dropbacks": 0, "games": 0, "last_team": None}
+            "dropbacks": 0, "games": 0, "last_team": None,
+            "last_season": None}
 
 
 def replay_v2(games: pd.DataFrame, team_games: pd.DataFrame,
@@ -260,6 +261,10 @@ def replay_v2(games: pd.DataFrame, team_games: pd.DataFrame,
                 qs["dropbacks"] += int(q.dropbacks)
                 qs["games"] += 1
                 qs["last_team"] = team
+                try:
+                    qs["last_season"] = int(q.season)
+                except (TypeError, ValueError, AttributeError):
+                    pass
                 if q.is_primary:
                     primary_id = q.qb_id
             if primary_id is not None:

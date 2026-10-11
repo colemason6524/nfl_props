@@ -46,6 +46,9 @@ FORECAST_STATE_PATH = PROCESSED_DIR / "forecast_state.json"
 MIN_GAMES_FOR_FIT = 10
 QB_SHRINK = 50.0
 REST_FILL = 7.0
+# Seasons of inactivity after which a QB is excluded from the backup
+# fallback in `resolve_priced_qb_id` (stale-QB guard: RG3 over Huntley).
+QB_RECENCY_WINDOW = 2
 
 _BASE = ("off_h", "off_a", "def_h", "def_a", "pace", "home")
 _SCHED = ("rest_diff", "dome", "div_game")
@@ -309,26 +312,37 @@ def resolve_priced_qb_id(team: Optional[str], team_state: dict,
     """Which QB id to price for `team` in a live forecast (NFL, Phase B).
 
     Non-"out" statuses (confirmed/questionable/unknown/missing context)
-    return the incumbent `last_qb_id` unchanged -- questionable stays
-    annotation-only. When the starter is "out": prefer `backup_qb_id` when
-    it carries live dropbacks in `qbs`; else the second-most-dropbacks QB
-    last seen with this team (`last_team` linkage); else None, which prices
-    as league average (`_qb_epa` contributes 0.0 for an unknown QB). The
-    injured starter is never returned when out.
+    return the `starter_qb_id` override when set and present in `qbs`,
+    else the incumbent `last_qb_id` unchanged -- questionable stays
+    annotation-only. This is the returning-starter path: when a starter
+    (e.g. Daniels) comes back, set `starter_qb_id` in personnel.json so
+    the model stops pricing the fill-in `last_qb_id`.
+    When the starter is "out": prefer `backup_qb_id` when it carries
+    live dropbacks in `qbs`; else the second-most-dropbacks QB last seen
+    with this team (`last_team` linkage) among QBs active within
+    `QB_RECENCY_WINDOW` seasons; else None, which prices as league average
+    (`_qb_epa` contributes 0.0 for an unknown QB). The injured starter is
+    never returned when out.
     """
     starter_id = team_state.get("last_qb_id")
     if not personnel_ctx or personnel_ctx.get("qb_status") != "out":
+        override = (personnel_ctx or {}).get("starter_qb_id")
+        if override and override in qbs:
+            return override
         return starter_id
     backup_id = personnel_ctx.get("backup_qb_id")
     if backup_id and backup_id != starter_id:
         qb = qbs.get(backup_id)
         if qb is not None and qb.get("dropbacks", 0) > 0:
             return backup_id
+    current = _qb_current_season(qbs)
     best_id, best_db = None, 0
     for qid, qb in qbs.items():
         if qid == starter_id:
             continue
         if qb.get("last_team") != team:
+            continue
+        if not _qb_is_recent(qb, current):
             continue
         try:
             db = int(qb.get("dropbacks", 0) or 0)
@@ -337,6 +351,36 @@ def resolve_priced_qb_id(team: Optional[str], team_state: dict,
         if db > best_db:
             best_id, best_db = qid, db
     return best_id
+
+
+def _qb_current_season(qbs: Dict[str, dict]) -> int:
+    """Newest `last_season` across `qbs`, else CURRENT_SEASON (fail-open).
+
+    Fixtures and legacy states carry no `last_season`; failing open keeps
+    every candidate eligible exactly as before the recency guard existed.
+    """
+    try:
+        seasons = [int(v["last_season"]) for v in qbs.values()
+                   if isinstance(v, dict)
+                   and v.get("last_season") is not None]
+    except (TypeError, ValueError, AttributeError):
+        return CURRENT_SEASON
+    return max(seasons) if seasons else CURRENT_SEASON
+
+
+def _qb_is_recent(qb: dict, current_season: int) -> bool:
+    """True when `qb` threw within `QB_RECENCY_WINDOW` seasons of live.
+
+    Missing `last_season` is fail-open (eligible): only a positively stale
+    record excludes a QB from the backup fallback.
+    """
+    last = qb.get("last_season")
+    if last is None:
+        return True
+    try:
+        return (int(current_season) - int(last)) <= QB_RECENCY_WINDOW
+    except (TypeError, ValueError):
+        return True
 
 
 def _qb_epa(team_state: dict, qbs: Dict[str, dict]) -> float:
