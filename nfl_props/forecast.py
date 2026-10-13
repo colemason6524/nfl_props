@@ -17,7 +17,7 @@ import numpy as np
 
 from .forecasting import game_features, project
 from .injury_debit import team_injury_debit
-from .ratings.epa import game_total_probs, spread_probs
+from .ratings.epa import game_total_probs, shrink_prob, spread_probs
 from .references import (BOVADA, POLYMARKET, ForecastReference,
                          build_reference)
 from .rivalry import live_rivalry_features
@@ -331,13 +331,17 @@ def build_game_forecast(game: dict, state: dict,
             "spread", None, None, None, 0.0, [], note="no posted line"))
 
     # Total: posted number defines the proposition; projection picks the side.
+    # Apply fitted gamma shrinkage (state["prob_shrink"]["total"]) — the raw
+    # empirical probabilities are systematically overconfident. Without this,
+    # the forecast path reports honest-looking but dishonest probabilities.
     total_line, total_src = _resolve_line(bovada_game, poly, "total")
     if total_line is not None:
         probs = game_total_probs(proj["mu_total"], rt, total_line)
+        _gamma_total = state.get("prob_shrink", {}).get("total", 1.0)
         if proj["mu_total"] > total_line:
-            side, p_model, opp = "over", probs["p_over"], "under"
+            side, p_model, opp = "over", shrink_prob(probs["p_over"], _gamma_total), "under"
         else:
-            side, p_model, opp = "under", probs["p_under"], "over"
+            side, p_model, opp = "under", shrink_prob(probs["p_under"], _gamma_total), "over"
         fc.references.append(build_reference(
             "total", side, total_line, p_model, probs["p_push"],
             _prices("total", side, opp, bovada_game, poly,
