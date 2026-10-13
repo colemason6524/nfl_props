@@ -1,9 +1,9 @@
 {
   "schema_version": 1,
   "project_id": "nfl_props",
-  "updated_at": "2026-10-13T13:54:01+00:00",
+  "updated_at": "2026-10-13T14:08:56+00:00",
   "status": "observing",
-  "summary": "Selection audit + MNF timing fix: spread p_model floor shipped (136 tests). Added Mon 19:15 ET pre-kickoff refresh timer (after inactives) to prevent repeat of DJ Moore miss.",
+  "summary": "Totals recalibration shipped: forecast path now applies gamma shrinkage (0.1) to total probabilities. Brier 0.2735->0.2515. 138 tests pass.",
   "experiment": null,
   "watching_for": null,
   "next_action": null,
@@ -13,7 +13,7 @@
     "kind": "grade_event",
     "label": "after a week of games",
     "target": null,
-    "baseline": "2026-10-13T13:54:01+00:00",
+    "baseline": "2026-10-13T14:08:56+00:00",
     "events": [],
     "target_date": null,
     "monitoring": false
