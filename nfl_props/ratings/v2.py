@@ -159,6 +159,7 @@ def replay_v2(games: pd.DataFrame, team_games: pd.DataFrame,
 
             qb_epa, qb_cpoe, qb_uncertain = _qb_features(
                 t_state, qbs, team)
+            qb_rookie = _qb_rookie_flag(t_state, qbs)
 
             rows.append({
                 "game_id": g.game_id, "season": g.season, "week": g.week,
@@ -186,6 +187,7 @@ def replay_v2(games: pd.DataFrame, team_games: pd.DataFrame,
                 "qb_epa": qb_epa,
                 "qb_cpoe": qb_cpoe,
                 "qb_uncertain": qb_uncertain,
+                "qb_rookie": qb_rookie,
             })
 
         # --- base state update (identical to v1) ---
@@ -273,6 +275,23 @@ def replay_v2(games: pd.DataFrame, team_games: pd.DataFrame,
     features = pd.DataFrame(rows)
     state = {"teams": teams, "qbs": qbs, "league": league}
     return features, state
+
+
+ROOKIE_DB_THRESHOLD = 150  # career dropbacks below which a QB is a rookie
+
+
+def _qb_rookie_flag(t_state: dict, qbs: Dict[str, dict]) -> float:
+    """1.0 if the team's expected starter is a rookie (<150 career dropbacks).
+
+    Unknown/absent QBs return 0.0 (unknown is not rookie; that's qb_uncertain).
+    The qbs dropback counts accumulate pre-snapshot, so this is leak-free.
+    """
+    qb_id = t_state.get("last_qb_id")
+    qb = qbs.get(qb_id) if qb_id else None
+    if not qb:
+        return 0.0
+    db = qb.get("dropbacks", 0)
+    return 1.0 if 0 < db < ROOKIE_DB_THRESHOLD else 0.0
 
 
 def _qb_features(t_state: dict, qbs: Dict[str, dict],

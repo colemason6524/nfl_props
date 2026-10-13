@@ -68,7 +68,7 @@ FEATURE_SETS: Dict[str, Dict[str, tuple]] = {
     },
     "full": {
         "winner": _BASE + _SCHED + _QB + _RIVALRY,
-        "margin": _BASE + _SCHED + _SPLIT + _QB + _RIVALRY,
+        "margin": _BASE + _SCHED + _SPLIT + _QB + _RIVALRY + ("qb_rookie_road",),
         "total": _TOTAL_BASE + _SCHED + _SPLIT + _QB + _WEATHER,
     },
 }
@@ -118,6 +118,10 @@ def paired_features(features: pd.DataFrame, games: pd.DataFrame,
     out["rush_def_a"] = both["opp_def_rush_h"].to_numpy(dtype=float)
     out["qb_epa_h"] = both["qb_epa_h"].to_numpy(dtype=float)
     out["qb_epa_a"] = both["qb_epa_a"].to_numpy(dtype=float)
+    out["qb_rookie_h"] = both["qb_rookie_h"].to_numpy(dtype=float)
+    out["qb_rookie_a"] = both["qb_rookie_a"].to_numpy(dtype=float)
+    # rookie QB on the road: systematically worse than EPA-implied (validated)
+    out["qb_rookie_road"] = out["qb_rookie_a"]
     out["points_h"] = both["points_h"].to_numpy(dtype=float)
     out["points_a"] = both["points_a"].to_numpy(dtype=float)
 
@@ -383,6 +387,17 @@ def _qb_is_recent(qb: dict, current_season: int) -> bool:
         return True
 
 
+def _qb_rookie(team_state: dict, qbs: Dict[str, dict]) -> float:
+    """1.0 if the priced QB is a rookie (<150 career dropbacks)."""
+    from .ratings.v2 import ROOKIE_DB_THRESHOLD
+    qb_id = team_state.get("last_qb_id")
+    qb = qbs.get(qb_id) if qb_id else None
+    if not qb:
+        return 0.0
+    db = qb.get("dropbacks", 0)
+    return 1.0 if 0 < db < ROOKIE_DB_THRESHOLD else 0.0
+
+
 def _qb_epa(team_state: dict, qbs: Dict[str, dict]) -> float:
     qb_id = team_state.get("last_qb_id")
     qb = qbs.get(qb_id) if qb_id else None
@@ -444,6 +459,7 @@ def game_features(state: dict, game: dict, rivalry: Optional[dict] = None,
         "rush_def_a": float(ta.get("def_rush", 0.0)),
         "qb_epa_h": _qb_epa(th_priced, qbs),
         "qb_epa_a": _qb_epa(ta_priced, qbs),
+        "qb_rookie_road": _qb_rookie(ta_priced, qbs),
         "priced_qb_h": th_priced["last_qb_id"],
         "priced_qb_a": ta_priced["last_qb_id"],
         "h2h_n": float(r.get("h2h_n", 0.0)),

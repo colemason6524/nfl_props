@@ -18,7 +18,7 @@ TIER_POLICY_VERSION = "core-lean-watch-v2"
 # --- Forecast-first cohort --------------------------------------------------
 FORECAST_MODEL_VERSION = "nfl-forecast-v1.1"
 WINNER_MODEL_VERSION = "nfl-winner-logit-v1"
-MARGIN_MODEL_VERSION = "nfl-margin-ridge-v1"
+MARGIN_MODEL_VERSION = "nfl-margin-ridge-v2"
 TOTAL_MODEL_VERSION = "nfl-total-ridge-v2"
 FORECAST_HISTORY_SCHEMA_VERSION = 1
 PRODUCT_POLICY_VERSION = "nfl-forecast-first-v1"
