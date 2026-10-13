@@ -1,6 +1,10 @@
 #!/usr/bin/env python3
 """Forecast-first NFL board entrypoint.
 
+0. Pull injuries (ESPN, nflverse fallback) before rebuilding state, so
+   QB-out substitution and injury debits reflect game-day inactives --
+   atomic with the board build, no stale-cache window (same contract as
+   scripts/pregame_refresh.py: pull failure -> exit 2, no board write).
 1. Load/replay the three family models (winner / margin / total).
 2. Universe = today's official nflverse schedule (incl. unpriced games).
 3. Build price-free forecasts, attach Bovada + Polymarket references.
@@ -26,6 +30,12 @@ from nfl_props.forecast_output import (append_ledger, export_history,
                                        latest_history, render_board)
 from nfl_props.forecasting import load_forecast_state, rebuild_forecast_state
 from nfl_props.schedule import current_day_games
+from nfl_props.sources.personnel_feed import (
+    PersonnelFeedError,
+    fetch_and_store,
+    personnel_is_fresh,
+    summarize,
+)
 from nfl_props.utils import log
 
 
@@ -45,6 +55,10 @@ def main() -> int:
     ap.add_argument("--discord", action="store_true")
     ap.add_argument("--date", default=None,
                     help="override ET calendar day (YYYY-MM-DD)")
+    ap.add_argument("--no-injury-pull", action="store_true",
+                    help="skip the pre-build injury pull (offline/test use)")
+    ap.add_argument("--injury-max-age-hours", type=float, default=20.0,
+                    help="stale guard for the pulled personnel cache")
     ap.add_argument("--now", default=None, help="override now (ISO UTC)")
     args = ap.parse_args()
 
@@ -52,6 +66,26 @@ def main() -> int:
     now = _parse_now(args.now) or datetime.now(timezone.utc)
 
     if args.rebuild_state:
+        if not args.no_injury_pull:
+            # Injury pull FIRST, then rebuild: the rebuilt state reads the
+            # just-written cache, so debits/QB substitution and the board
+            # agree. Closes the Thursday-board (TNF) gap that the Sunday
+            # pregame refresh leaves behind.
+            try:
+                teams = fetch_and_store(now=now)
+            except PersonnelFeedError as exc:
+                log(f"[forecast] injury pull failed ({exc}); no board write")
+                return 2
+            except Exception as exc:  # fail-open on anything unexpected
+                log(f"[forecast] injury pull failed ({exc}); no board write")
+                return 2
+            for line in summarize(teams):
+                log(f"[forecast] personnel {line}")
+            if not personnel_is_fresh(
+                    max_age_hours=args.injury_max_age_hours, now=now):
+                log("[forecast] personnel cache still stale after pull; "
+                    "no board write")
+                return 2
         rebuild_forecast_state()
     state = load_forecast_state()
 
