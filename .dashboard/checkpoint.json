@@ -1,9 +1,9 @@
 {
   "schema_version": 1,
   "project_id": "nfl_props",
-  "updated_at": "2026-10-13T14:08:56+00:00",
+  "updated_at": "2026-10-13T14:30:39+00:00",
   "status": "observing",
-  "summary": "Totals recalibration shipped: forecast path now applies gamma shrinkage (0.1) to total probabilities. Brier 0.2735->0.2515. 138 tests pass.",
+  "summary": "Verified ESPN injury feed live (800 entries, 169 out-ish, 32 teams) and end-to-end impact: BAL@CLE forecast margin -7.9 vs -7.4, total 35.5 vs 40.6 with injuries on/off. Fixed real gap: Thursday TNF board never pulled injuries (used 4-day-old Sunday cache). run_forecast_board.py now pulls before rebuild with pregame fail-open contract (exit 2, no board write). MNF 19:15 ET timer verified scheduled (next Mon 10/19). 143 tests pass.",
   "experiment": null,
   "watching_for": null,
   "next_action": null,
@@ -11,9 +11,9 @@
   "git_commit": "",
   "check_back": {
     "kind": "grade_event",
-    "label": "after a week of games",
+    "label": "board-injury-pull",
     "target": null,
-    "baseline": "2026-10-13T14:08:56+00:00",
+    "baseline": "2026-10-13T14:30:39+00:00",
     "events": [],
     "target_date": null,
     "monitoring": false
