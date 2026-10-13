@@ -31,6 +31,10 @@ POLYMARKET = "polymarket"
 
 PLAYABLE_EV = float(os.environ.get("NFL_VALUE_PLAYABLE", "0.0"))
 
+# Selection audit 2026-10-13: spread p_model < 0.60 is catastrophically
+# overconfident (12-24-1, -12.43u on graded PLAYABLE refs).
+P_MODEL_MIN_SPREAD = float(os.environ.get("NFL_P_MODEL_MIN_SPREAD", "0.60"))
+
 
 def status_for(ev: Optional[float]) -> str:
     if ev is None:
@@ -102,6 +106,11 @@ def build_reference(
     ev = (expected_value(p_model_c, dec, p_push)
           if p_model_c is not None else None)
     edge = (p_model_c - consensus) if p_model_c is not None else None
+    status = status_for(ev)
+    if (family == "spread" and p_model_c is not None
+            and p_model_c < P_MODEL_MIN_SPREAD and status == PLAYABLE):
+        status = NO_VALUE
+        note = (note + " " if note else "") + "P_MODEL_BELOW_FLOOR"
     return ForecastReference(
         family=family, source=primary[0], sources=[e[0] for e in entries],
         side=side, line=line,
@@ -110,5 +119,5 @@ def build_reference(
         p_market=round(consensus, 4),
         edge=round(edge, 4) if edge is not None else None,
         ev=round(ev, 4) if ev is not None else None,
-        status=status_for(ev), n_sources=len(entries),
-        captured_at=captured_at)
+        status=status, n_sources=len(entries),
+        captured_at=captured_at, note=note)

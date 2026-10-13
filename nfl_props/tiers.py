@@ -22,6 +22,7 @@ EV_MAX = float(os.environ.get("NFL_EV_MAX", "0.08"))
 EDGE_MIN = float(os.environ.get("NFL_EDGE_MIN", "0.02"))
 CORE_EV_MIN = float(os.environ.get("NFL_CORE_EV_MIN", "0.02"))
 MIN_TEAM_GAMES = int(os.environ.get("NFL_MIN_TEAM_GAMES", "3"))
+P_MODEL_MIN_SPREAD = float(os.environ.get("NFL_P_MODEL_MIN_SPREAD", "0.60"))
 
 
 @dataclass
@@ -55,6 +56,12 @@ def assign_tier(c: Candidate) -> str:
     if not (EV_MIN <= c.ev <= EV_MAX):
         return "Watch"
     if c.edge < EDGE_MIN:
+        return "Watch"
+    if c.market == "SPREAD" and c.p_model < P_MODEL_MIN_SPREAD:
+        # Selection audit 2026-10-13: spread p_model < 0.60 is toxic
+        # (12-24-1, -12.43u); p>=0.60 spreads are 16-13, +2.22u.
+        if "P_MODEL_BELOW_FLOOR" not in c.flags:
+            c.flags.append("P_MODEL_BELOW_FLOOR")
         return "Watch"
     if c.games_current_min < MIN_TEAM_GAMES:
         return "Lean"
