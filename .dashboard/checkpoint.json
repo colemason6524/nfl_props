@@ -1,9 +1,9 @@
 {
   "schema_version": 1,
   "project_id": "nfl_props",
-  "updated_at": "2026-10-14T02:31:43+00:00",
+  "updated_at": "2026-10-14T03:01:56+00:00",
   "status": "observing",
-  "summary": "Shipped NFL wave boards + latest-snapshot grading (commit 1497e4d). run_forecast_board.py --wave: filters to kickoff>now+15min, WAVE label, forced fresh injury pull (fail-closed), skips when <3 games remain. New nfl_props/snapshots.py writes per-game pregame snapshots (outputs/snapshots/{date}/{game_id}.json, source early|wave|delta, 30d retention); board/pregame_refresh/delta_check all write them. Grading now uses latest snapshot with timestamp<kickoff for reference ROI, falling back to board artifact. sports-nfl-wave2 timer live: Sun 2:30pm ET full refresh for 4pm+8pm games (next elapse Sun 2026-10-18 18:30 UTC). 19 new tests; full suite 192 passed. Timing verified: 9:30am ET early board is sports-nfl-pregame-refresh (Sun 13:30 UTC), not sports-nfl-board (Sun 11:00 ET). Follow-up: 6:45pm ET delta-check timer for the 8pm game not yet scheduled.",
+  "summary": "Wave board system simplified per Cole decision.",
   "experiment": null,
   "watching_for": null,
   "next_action": null,
@@ -11,9 +11,9 @@
   "git_commit": "",
   "check_back": {
     "kind": "grade_event",
-    "label": "wave boards + snapshot grading",
+    "label": "after a week of games",
     "target": null,
-    "baseline": "2026-10-14T02:31:43+00:00",
+    "baseline": "2026-10-14T03:01:56+00:00",
     "events": [],
     "target_date": null,
     "monitoring": false
