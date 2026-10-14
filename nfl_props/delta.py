@@ -390,6 +390,9 @@ class DeltaResult:
     games_checked: int = 0
     games_firing: int = 0
     error: Optional[str] = None
+    # Recomputed forecasts for firing games, for pregame snapshot writes
+    # (scripts/delta_check.py). GameForecast objects.
+    firing_forecasts: List = field(default_factory=list)
 
 
 def run_delta_check(now: Optional[datetime] = None,
@@ -442,7 +445,7 @@ def run_delta_check(now: Optional[datetime] = None,
                 return bg
         return None
 
-    deltas: List[GameDelta] = []
+    pairs: List[Tuple[GameDelta, object]] = []
     for fc_dict in forecasts:
         if not fc_dict.get("available", True):
             continue
@@ -453,11 +456,13 @@ def run_delta_check(now: Optional[datetime] = None,
                                         fc_dict.get("home")))
         except Exception:
             continue  # one bad game must not kill the check
-        deltas.append(diff_game(fc_dict, new_fc))
+        pairs.append((diff_game(fc_dict, new_fc), new_fc))
 
+    deltas = [d for d, _ in pairs]
     result.games_checked = len(deltas)
     firing = [d for d in deltas if d.tier > 0]
     result.games_firing = len(firing)
+    result.firing_forecasts = [fc for d, fc in pairs if d.tier > 0]
     if not firing:
         return result  # silent: nothing material changed
 

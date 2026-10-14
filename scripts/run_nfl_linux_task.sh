@@ -32,6 +32,14 @@ case "$TASK" in
         COMMAND=("$PYTHON_EXE" run_forecast_board.py --rebuild-state --discord)
         REQUIRED_SECRET=NFL_DISCORD_WEBHOOK_URL
         ;;
+    wave)
+        LOG_FILE="$LOG_DIR/nfl_wave.log"
+        TIMEOUT=45m
+        # Sunday 2:30pm ET: full refresh for the remaining slate
+        # (4pm + 8pm games). Skips when fewer than 3 games remain.
+        COMMAND=("$PYTHON_EXE" run_forecast_board.py --wave --discord)
+        REQUIRED_SECRET=NFL_DISCORD_WEBHOOK_URL
+        ;;
     grade)
         LOG_FILE="$LOG_DIR/nfl_grade.log"
         TIMEOUT=90m

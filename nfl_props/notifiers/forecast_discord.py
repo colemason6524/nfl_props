@@ -60,11 +60,14 @@ def post_webhook(webhook_url: str, content: str) -> SendResult:
 
 
 def send_forecast(webhook_url: str, forecasts: List[GameForecast],
-                  summary: dict, now: Optional[datetime] = None) -> SendResult:
+                  summary: dict, now: Optional[datetime] = None,
+                  wave: bool = False,
+                  changes: Optional[List[dict]] = None) -> SendResult:
     """Post the three-section board. Nothing to post is success."""
     if not any(fc.available for fc in forecasts):
         return SendResult(ok=True)
-    text = render_board(forecasts, summary, now=now)
+    text = render_board(forecasts, summary, now=now, wave=wave,
+                        changes=changes)
     for chunk in chunk_messages(text):
         result = post_webhook(webhook_url, chunk)
         if not result.ok:

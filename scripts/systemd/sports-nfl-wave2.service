@@ -1,0 +1,10 @@
+[Unit]
+Description=NFL Sunday wave board: full refresh for remaining games (2:30pm ET)
+After=network-online.target
+Wants=network-online.target
+ConditionPathExists=%h/nfl_props/scripts/run_nfl_linux_task.sh
+
+[Service]
+Type=oneshot
+ExecStart=%h/nfl_props/scripts/run_nfl_linux_task.sh wave
+TimeoutStartSec=infinity

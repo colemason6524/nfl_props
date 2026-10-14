@@ -9,6 +9,9 @@ pick value (Tier 1: edge shift / flip / key player; Tier 2: margin move
 Fail-open contract: any failure (no fresh board, pull failure, recompute
 error) -> exit 0 with NO alert. Never alert on stale data.
 
+When an alert posts, pregame snapshots (source="delta") are written for
+the firing games so grading uses the updated picks.
+
 Usage:
     python scripts/delta_check.py [--discord] [--now ISO] [--max-age-hours 12]
 
@@ -26,6 +29,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from nfl_props import config
 from nfl_props.delta import run_delta_check
+from nfl_props.snapshots import write_board_snapshots
 from nfl_props.utils import log
 
 
@@ -63,6 +67,15 @@ def main(argv=None) -> int:
         f"firing={result.games_firing} posted={result.posted}")
     if result.error:
         log(f"[delta] note: {result.error}")
+    if result.posted and result.firing_forecasts:
+        # The alert updated the bettable state: record the latest pregame
+        # snapshot (source="delta") so grading uses the updated picks.
+        try:
+            n_snap = write_board_snapshots(
+                result.firing_forecasts, "delta", now=now)
+            log(f"[delta] snapshots written: {n_snap} (delta)")
+        except Exception as exc:  # snapshots must never fail the check
+            log(f"[delta] snapshot write failed ({exc})")
     if result.message and not result.posted:
         # Dry run (or discord disabled): print what WOULD have posted.
         print(result.message)

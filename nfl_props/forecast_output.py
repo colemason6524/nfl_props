@@ -5,6 +5,7 @@ import json
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Dict, List, Optional
+from zoneinfo import ZoneInfo
 
 from .config import FORECAST_HISTORY_DIR
 from .forecast import GameForecast
@@ -42,16 +43,33 @@ def _projection(fc: GameForecast, family: str) -> str:
 
 
 def render_board(forecasts: List[GameForecast], summary: dict,
-                 now: Optional[datetime] = None) -> str:
+                 now: Optional[datetime] = None, wave: bool = False,
+                 changes: Optional[List[dict]] = None) -> str:
     now = now or datetime.now(timezone.utc)
-    day = now.strftime("%a %b %d")
-    lines = [f"NFL Forecast Board — {day} (ET)",
-             f"{summary.get('games', 0)} games | "
-             f"{summary.get('available', 0)} rated | "
-             f"{summary.get('priced', 0)} priced"]
+    if wave:
+        et = now.astimezone(ZoneInfo("America/New_York"))
+        stamp = et.strftime("%-I:%M%p").lower()
+        lines = [f"\U0001f30a WAVE — Remaining games ({stamp} ET)",
+                 f"{summary.get('games', 0)} games | "
+                 f"{summary.get('available', 0)} rated | "
+                 f"{summary.get('priced', 0)} priced"]
+    else:
+        day = now.strftime("%a %b %d")
+        lines = [f"NFL Forecast Board — {day} (ET)",
+                 f"{summary.get('games', 0)} games | "
+                 f"{summary.get('available', 0)} rated | "
+                 f"{summary.get('priced', 0)} priced"]
     if summary.get("unavailable_games"):
         lines.append("UNRATED (no forecast): " +
                      ", ".join(summary["unavailable_games"]))
+    if wave and changes:
+        moved = [c for c in changes
+                 if c.get("kind") == "MATERIAL_CHANGE"]
+        if moved:
+            lines.append(f"\u21bb Updated from early board ({len(moved)}):")
+            for c in moved:
+                reasons = "; ".join(c.get("reasons", []))
+                lines.append(f"  - {c.get('matchup')}: {reasons}")
     for family, label in SECTIONS:
         rows = [fc for fc in forecasts if fc.available and ref_for(fc, family)]
         lines.append(f"\n== {label} ({len(rows)}) ==")

@@ -1,0 +1,12 @@
+[Unit]
+Description=Sunday 2:30pm ET NFL wave board (remaining games full refresh)
+
+[Timer]
+OnCalendar=Sun *-*-* 14:30:00 America/New_York
+AccuracySec=1s
+RandomizedDelaySec=0
+Persistent=false
+Unit=sports-nfl-wave2.service
+
+[Install]
+WantedBy=timers.target

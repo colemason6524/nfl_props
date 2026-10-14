@@ -8,6 +8,12 @@ forecast id, and reports:
   forecast  : winner accuracy (ties excluded), Brier, log loss, margin/total MAE
   reference : flat-1u ROI at captured prices, by family / source / label
 
+Reference grading uses the latest pregame snapshot (outputs/snapshots/)
+when one exists with timestamp < kickoff -- i.e. what was actually
+bettable after wave boards / delta alerts -- falling back to the board
+artifact otherwise. Forecast accuracy is always graded from the board
+artifact.
+
 Forecast accuracy and reference value are never pooled. NFL ties settle the
 moneyline reference as a push (stake returned), never a loss.
 """
@@ -27,6 +33,7 @@ import pandas as pd
 
 from nfl_props import config
 from nfl_props.config import FORECAST_BACKTESTS_DIR, FORECAST_HISTORY_DIR
+from nfl_props.snapshots import latest_snapshot_before
 from nfl_props.utils import log
 from nfl_props.version import (FORECAST_GRADING_VERSION,
                                FORECAST_MODEL_VERSION)
@@ -74,6 +81,33 @@ def select_latest_pregame(paths: List[Path]) -> Dict[str, dict]:
                 row["_kickoff"] = kickoff
                 chosen[fid] = row
     return chosen
+
+
+def _with_snapshot_pick(fc: dict) -> dict:
+    """Swap in the latest pregame snapshot's picks for reference grading.
+
+    Grading uses the latest bettable state: if a wave board or delta alert
+    updated a pick after the board artifact was written, the snapshot with
+    the latest ``timestamp < kickoff`` wins. Falls back to the board
+    artifact when no snapshot exists (historical backfill path).
+    Forecast-quality fields (p_home_win, projected margin/total) always
+    come from the board artifact -- snapshots only override references.
+    """
+    fid = fc.get("forecast_id") or fc.get("game_id")
+    kickoff = fc.get("_kickoff")
+    if not fid or kickoff is None:
+        return fc
+    try:
+        snap = latest_snapshot_before(str(fid), kickoff)
+    except Exception:
+        return fc
+    if not snap or not snap.get("picks"):
+        return fc
+    out = dict(fc)
+    out["references"] = snap["picks"]
+    out["_snapshot_source"] = snap.get("source")
+    out["_snapshot_ts"] = snap.get("timestamp")
+    return out
 
 
 def match_final(games: pd.DataFrame, away: str, home: str,
@@ -157,6 +191,7 @@ def grade_all(since: str = "") -> dict:
     ref_rows: List[dict] = []
 
     for fc in chosen.values():
+        fc = _with_snapshot_pick(fc)
         final = match_final(games, fc["away"], fc["home"], fc["_kickoff"])
         if final is None or pd.isna(final["home_score"]) \
                 or pd.isna(final["away_score"]):
@@ -359,6 +394,7 @@ def grade_week(season: Optional[int] = None, week: Optional[int] = None,
     market_reversal_n = market_reversal_correct = market_reversal_incorrect = 0
 
     for fc in chosen.values():
+        fc = _with_snapshot_pick(fc)
         final = match_final(games, fc["away"], fc["home"], fc["_kickoff"])
         if final is None or str(final.get("game_type")) != "REG" \
                 or int(final["season"]) != season \

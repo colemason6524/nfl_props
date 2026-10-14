@@ -44,6 +44,7 @@ from nfl_props.forecast_output import (append_ledger, export_history,
                                        latest_history, render_board)
 from nfl_props.forecasting import rebuild_forecast_state
 from nfl_props.schedule import current_day_games
+from nfl_props.snapshots import write_board_snapshots
 from nfl_props.sources.personnel_feed import (
     PersonnelFeedError,
     fetch_and_store,
@@ -143,6 +144,12 @@ def main(argv=None) -> int:
     changes = detect_changes(forecasts, prev)
 
     print(render_board(forecasts, summary, now=now))
+
+    try:
+        n_snap = write_board_snapshots(forecasts, "early", now=now)
+        log(f"[pregame] snapshots written: {n_snap} (early)")
+    except Exception as exc:  # snapshots must never kill the board
+        log(f"[pregame] snapshot write failed ({exc})")
 
     diagnostics = {"bovada": diags, "polymarket": poly_diags}
     if not args.no_export:
