@@ -82,8 +82,34 @@ def _map_position(abbrev: object) -> Optional[str]:
 
 def _empty_team(source: str, stamp: str) -> dict:
     return {"qb_status": "unknown", "key_out": [], "backup_qb_id": None,
-            "starter_qb_id": None,
+            "starter_qb_id": None, "qb_details": [],
             "updated_at": stamp, "source": source}
+
+
+def _resolve_qb_status(teams: Dict[str, dict]) -> None:
+    """Set team-level qb_status from collected qb_details.
+
+    A backup QB being Out/Doubtful must not flag the starter as out.
+    Rules:
+    - Any QB Active/Confirmed -> "confirmed" (team has a healthy QB).
+    - Elif any QB Out -> "out" (no healthy QB available).
+    - Elif any QB Questionable -> "questionable".
+    - No QB details -> leave as-is (set by non-QB entries).
+    The per-QB qb_details list is kept for downstream starter matching.
+    """
+    for entry in teams.values():
+        details = entry.get("qb_details") or []
+        if not details:
+            continue
+        statuses = {d.get("status") for d in details if isinstance(d, dict)}
+        if "confirmed" in statuses:
+            entry["qb_status"] = "confirmed"
+        elif "out" in statuses:
+            entry["qb_status"] = "out"
+        elif "questionable" in statuses and entry.get("qb_status") != "out":
+            entry["qb_status"] = "questionable"
+        elif entry.get("qb_status") == "unknown":
+            entry["qb_status"] = "confirmed"
 
 
 def parse_espn_payload(payload: dict,
@@ -120,13 +146,15 @@ def parse_espn_payload(payload: dict,
                 pos_raw, dict) else None)
             entry = teams.setdefault(abbr, _empty_team(SOURCE_ESPN, stamp))
             if pos == "QB":
-                if status == "out":
-                    entry["qb_status"] = "out"
-                elif status == "questionable" and \
-                        entry["qb_status"] != "out":
-                    entry["qb_status"] = "questionable"
-                elif entry["qb_status"] == "unknown":
-                    entry["qb_status"] = "confirmed"
+                # Track every QB; team-level qb_status is resolved after
+                # all entries are seen (see _resolve_qb_status). A backup
+                # QB being Out must NOT flag the starter as out.
+                entry.setdefault("qb_details", []).append({
+                    "name": athlete.get("displayName"),
+                    "espn_id": str(inj.get("id"))
+                    if inj.get("id") is not None else None,
+                    "status": status,
+                })
             else:
                 if entry["qb_status"] == "unknown":
                     entry["qb_status"] = "confirmed"
@@ -137,6 +165,7 @@ def parse_espn_payload(payload: dict,
                          if inj.get("id") is not None else None})
     if not teams:
         raise PersonnelFeedError("ESPN payload produced zero teams")
+    _resolve_qb_status(teams)
     return teams
 
 
@@ -170,12 +199,13 @@ def parse_nflverse_csv(text: str, source: str = SOURCE_NFLVERSE,
         pos = _map_position(r.get("position"))
         entry = teams.setdefault(abbr, _empty_team(source, stamp))
         if pos == "QB":
-            if status == "out":
-                entry["qb_status"] = "out"
-            elif status == "questionable" and entry["qb_status"] != "out":
-                entry["qb_status"] = "questionable"
-            elif entry["qb_status"] == "unknown":
-                entry["qb_status"] = "confirmed"
+            # Same backup-QB guard as the ESPN parser: collect details,
+            # resolve team status afterwards via _resolve_qb_status.
+            entry.setdefault("qb_details", []).append({
+                "name": r.get("full_name") or r.get("player_name"),
+                "gsis_id": r.get("gsis_id"),
+                "status": status,
+            })
         else:
             if entry["qb_status"] == "unknown":
                 entry["qb_status"] = "confirmed"
@@ -184,6 +214,7 @@ def parse_nflverse_csv(text: str, source: str = SOURCE_NFLVERSE,
                     {"position": pos, "player_id": r.get("gsis_id")})
     if not teams:
         raise PersonnelFeedError("nflverse CSV produced zero teams")
+    _resolve_qb_status(teams)
     return teams
 
 
