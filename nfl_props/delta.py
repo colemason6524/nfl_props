@@ -15,6 +15,7 @@ Design doc: docs/delta-alerts-spec.md
 from __future__ import annotations
 
 import json
+import re
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
@@ -331,6 +332,174 @@ def evaluate_tier(delta: GameDelta) -> Tuple[int, List[str]]:
 
 
 # ---------------------------------------------------------------------------
+# Pre-post verification gate (Cole-approved 2026-10-16)
+# ---------------------------------------------------------------------------
+# After the 2026-10-15 TNF false "both starting QBs out" alert (the feed
+# flagged backup QBs Ehlinger/Milroe as out while starters Nix/Darnold were
+# active), high-impact claims are cross-verified in BOTH injury sources
+# before anything posts to Discord. Unverifiable or implausible claims are
+# HELD: logged, never posted. Ordinary Tier 1 alerts (small edge shifts,
+# flips, no QB news) bypass the gate and post normally.
+
+#: Single-reference edge shift above this is implausible -> hold for review.
+GATE_EDGE_TRIPWIRE = 0.05
+
+#: injury_changes patterns that assert a QB is newly OUT.
+_QB_OUT_RES = [
+    re.compile(r"\(QB,\s*([A-Z]{2,3})\)\s*OUT"),   # "00-1 (QB, DEN) OUT - late inactive"
+    re.compile(r"\bQB\s*\(\s*([A-Z]{2,3})\s*\)\s*OUT"),  # "QB (DEN) OUT - newly inactive"
+    re.compile(r"^([A-Z]{2,3})\s+QB change:"),        # "DEN QB change: a -> b"
+]
+
+
+@dataclass
+class GateResult:
+    allowed: bool = True
+    hold_reasons: List[str] = field(default_factory=list)
+    verified: List[str] = field(default_factory=list)
+
+
+def _qb_out_claim_teams(delta: GameDelta) -> List[str]:
+    """Team abbrs with a QB-newly-OUT claim in this delta."""
+    teams: List[str] = []
+    for change in delta.injury_changes:
+        for rx in _QB_OUT_RES:
+            m = rx.search(change)
+            if m:
+                teams.append(m.group(1))
+                break
+    seen, uniq = set(), []
+    for t in teams:
+        if t not in seen:
+            seen.add(t)
+            uniq.append(t)
+    return uniq
+
+
+def _norm_name(name) -> str:
+    return re.sub(r"\s+", " ", str(name or "").strip().lower())
+
+
+def _verify_starter_out(team_abbr: str,
+                        teams: Dict[str, dict],
+                        personnel: Dict[str, dict],
+                        espn_teams: Optional[Dict[str, dict]],
+                        nflverse_teams: Optional[Dict[str, dict]]
+                        ) -> Tuple[bool, str]:
+    """Confirm the starter is OUT in both feeds independently.
+
+    Returns (verified, reason). Anything unverifiable -> (False, reason):
+    the gate holds rather than posting on uncertain data.
+    """
+    if espn_teams is None or nflverse_teams is None:
+        return False, f"{team_abbr} QB-out unverifiable (injury source unavailable)"
+    ctx = personnel.get(team_abbr) or {}
+    tstate = teams.get(team_abbr) or {}
+    starter_id = ctx.get("starter_qb_id") or tstate.get("last_qb_id")
+    if not starter_id:
+        return False, f"{team_abbr} QB-out unverifiable (no starter id)"
+    nv_details = ((nflverse_teams.get(team_abbr) or {}).get("qb_details")) or []
+    starter_nv = next(
+        (d for d in nv_details
+         if isinstance(d, dict) and d.get("gsis_id") == starter_id),
+        None)
+    if starter_nv is None:
+        return False, (f"{team_abbr} QB-out unverifiable "
+                       f"(starter {starter_id} not in nflverse QB details)")
+    if starter_nv.get("status") != "out":
+        return False, (f"{team_abbr} starter {starter_nv.get('name')} is "
+                       f"{starter_nv.get('status')} in nflverse, not out")
+    espn_details = ((espn_teams.get(team_abbr) or {}).get("qb_details")) or []
+    want = _norm_name(starter_nv.get("name"))
+    if not want:
+        return False, f"{team_abbr} QB-out unverifiable (no starter name)"
+    starter_espn = next(
+        (d for d in espn_details
+         if isinstance(d, dict) and _norm_name(d.get("name")) == want),
+        None)
+    if starter_espn is None:
+        return False, (f"{team_abbr} QB-out unverifiable "
+                       f"(starter {starter_nv.get('name')} not in ESPN QB details)")
+    if starter_espn.get("status") != "out":
+        return False, (f"{team_abbr} starter {starter_espn.get('name')} is "
+                       f"{starter_espn.get('status')} in ESPN, not out")
+    return True, (f"{team_abbr} starter {starter_nv.get('name')} "
+                  f"OUT confirmed in ESPN + nflverse")
+
+
+def verify_post_gate(deltas: List[GameDelta],
+                     teams: Dict[str, dict],
+                     personnel: Dict[str, dict],
+                     espn_teams: Optional[Dict[str, dict]],
+                     nflverse_teams: Optional[Dict[str, dict]]) -> GateResult:
+    """Pre-post verification gate for high-impact delta claims.
+
+    Pure function (no I/O): callers supply the firing deltas plus
+    independent ESPN/nflverse team dicts. High-impact = QB newly OUT,
+    Tier 2 re-board, or any single-reference edge shift > GATE_EDGE_TRIPWIRE.
+    Holds are fail-closed: unverifiable or implausible -> never post.
+    """
+    result = GateResult()
+    claimed: List[Tuple[str, str]] = []  # (forecast_id, team_abbr)
+    for delta in deltas:
+        claim_teams = _qb_out_claim_teams(delta)
+        max_edge = max((abs(rd.edge_delta or 0.0) for rd in delta.ref_deltas),
+                       default=0.0)
+        high_impact = (bool(claim_teams) or delta.tier == 2
+                       or max_edge > GATE_EDGE_TRIPWIRE)
+        if not high_impact:
+            continue  # ordinary alert: gate does not apply
+        # Tripwire: implausible single-reference edge move with injury news.
+        if delta.injury_changes and max_edge > GATE_EDGE_TRIPWIRE:
+            result.hold_reasons.append(
+                f"{delta.matchup}: edge shift {max_edge:.1%} exceeds "
+                f"{GATE_EDGE_TRIPWIRE:.0%} plausibility bound - held for review")
+            continue
+        for team in claim_teams:
+            claimed.append((delta.forecast_id, team))
+            ok, reason = _verify_starter_out(
+                team, teams, personnel, espn_teams, nflverse_teams)
+            if ok:
+                result.verified.append(f"{delta.matchup}: {reason}")
+            else:
+                result.hold_reasons.append(f"{delta.matchup}: {reason} - held")
+    # Tripwire: both starting QBs out in one game -> never auto-post.
+    by_game: Dict[str, List[str]] = {}
+    for fid, team in claimed:
+        by_game.setdefault(fid, []).append(team)
+    for fid, teams_ in by_game.items():
+        if len(set(teams_)) >= 2:
+            result.hold_reasons.append(
+                f"{fid}: QB-out claims on both teams - held for human review")
+    result.allowed = not result.hold_reasons
+    return result
+
+
+def _run_post_gate(deltas: List[GameDelta], state: dict) -> GateResult:
+    """Fetch both injury sources independently and run the gate.
+
+    Network failures -> sources are None -> gate holds high-impact claims
+    (fail-closed for big claims; ordinary alerts already bypassed).
+    """
+    from .utils import log
+    from .sources import personnel_feed as pf
+    espn_teams = None
+    nflverse_teams = None
+    try:
+        espn_teams = pf.fetch_espn_teams()
+    except Exception as exc:
+        log(f"[delta-gate] ESPN verify pull failed: {exc}")
+    try:
+        nflverse_teams = pf.fetch_nflverse_teams()
+    except Exception as exc:
+        log(f"[delta-gate] nflverse verify pull failed: {exc}")
+    teams = state.get("teams", {}) or {}
+    personnel = state.get("personnel", {}) or {}
+    return verify_post_gate(deltas, teams, personnel,
+                            espn_teams, nflverse_teams)
+
+
+# ---------------------------------------------------------------------------
 # Discord formatting
 # ---------------------------------------------------------------------------
 
@@ -393,6 +562,9 @@ class DeltaResult:
     # Recomputed forecasts for firing games, for pregame snapshot writes
     # (scripts/delta_check.py). GameForecast objects.
     firing_forecasts: List = field(default_factory=list)
+    # Pre-post verification gate outcome (2026-10-16).
+    gate_held: bool = False
+    hold_reasons: List[str] = field(default_factory=list)
 
 
 def run_delta_check(now: Optional[datetime] = None,
@@ -473,6 +645,17 @@ def run_delta_check(now: Optional[datetime] = None,
         now_et = now
     message = format_alert(deltas, now_et)
     result.message = message
+    gate = _run_post_gate(firing, state)
+    if not gate.allowed:
+        result.gate_held = True
+        result.hold_reasons = gate.hold_reasons
+        for reason in gate.hold_reasons:
+            log(f"[delta-gate] HOLD: {reason}")
+        held_note = "post gate held: " + "; ".join(gate.hold_reasons)
+        result.error = (result.error + "; " if result.error else "") + held_note
+        return result
+    for verified in gate.verified:
+        log(f"[delta-gate] verified: {verified}")
     if discord and webhook_url and message:
         from .notifiers.forecast_discord import post_webhook
         send = post_webhook(webhook_url, message)

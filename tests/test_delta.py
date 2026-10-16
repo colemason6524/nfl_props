@@ -269,11 +269,14 @@ class RunDeltaCheckTest(unittest.TestCase):
                         return_value={"personnel": {}}), \
              mock.patch.object(D, "refresh_state_personnel",
                                return_value={}), \
-             mock.patch.object(D, "recompute_game", return_value=new_fc):
+             mock.patch.object(D, "recompute_game", return_value=new_fc), \
+             mock.patch.object(D, "_run_post_gate",
+                               return_value=D.GateResult(allowed=True)):
             res = D.run_delta_check(refresh_odds=False)
             self.assertEqual(res.games_firing, 1)
             self.assertIn("SEA @ DEN", res.message)
             self.assertFalse(res.posted)  # no discord without webhook
+            self.assertFalse(res.gate_held)
 
 
 
@@ -293,6 +296,155 @@ class UnpricedFlipTest(unittest.TestCase):
         rd = ReferenceDelta("spread", "home", -3.5, -3.5,
                             0.05, -0.01, "PLAYABLE", "NO_VALUE")
         self.assertTrue(rd.flipped)
+
+class PostGateTest(unittest.TestCase):
+    """Pre-post verification gate (2026-10-16).
+
+    Regression coverage for the 2026-10-15 TNF false "both starting QBs
+    out" alert: backup QBs out + starters active must NEVER post.
+    """
+
+    def _delta(self, **kw):
+        base = {
+            "forecast_id": "g1", "away": "SEA", "home": "DEN",
+            "margin_old": 3.0, "margin_new": 3.2,
+            "total_old": 44.5, "total_new": 44.5,
+            "injury_changes": [], "ref_deltas": [], "tier": 1,
+        }
+        base.update(kw)
+        return D.GameDelta(**base)
+
+    def _refd(self, edge_old, edge_new):
+        return D.ReferenceDelta(
+            "spread", "DEN", -2.5, -2.5, edge_old, edge_new,
+            "PLAYABLE", "PLAYABLE")
+
+    def _qb(self, name, status, gsis_id=None, espn_id=None):
+        d = {"name": name, "status": status}
+        if gsis_id is not None:
+            d["gsis_id"] = gsis_id
+        if espn_id is not None:
+            d["espn_id"] = espn_id
+        return d
+
+    def _team(self, details):
+        return {"qb_status": "out", "qb_details": details, "key_out": []}
+
+    def _thursday(self):
+        """2026-10-15 TNF fixture: backups out, starters active."""
+        teams = {"DEN": {"last_qb_id": "DEN-QB1"},
+                 "SEA": {"last_qb_id": "SEA-QB1"}}
+        personnel = {"DEN": {}, "SEA": {}}
+        nv = {
+            "DEN": self._team([
+                self._qb("Bo Nix", "confirmed", gsis_id="DEN-QB1"),
+                self._qb("Sam Ehlinger", "out", gsis_id="DEN-QB2")]),
+            "SEA": self._team([
+                self._qb("Sam Darnold", "confirmed", gsis_id="SEA-QB1"),
+                self._qb("Jalen Milroe", "out", gsis_id="SEA-QB3")]),
+        }
+        espn = {
+            "DEN": self._team([
+                self._qb("Bo Nix", "confirmed", espn_id="e1"),
+                self._qb("Sam Ehlinger", "out", espn_id="e2")]),
+            "SEA": self._team([
+                self._qb("Sam Darnold", "confirmed", espn_id="e3"),
+                self._qb("Jalen Milroe", "out", espn_id="e4")]),
+        }
+        return teams, personnel, nv, espn
+
+    def test_thursday_false_positive_held(self):
+        teams, personnel, nv, espn = self._thursday()
+        delta = self._delta(
+            injury_changes=["DEN-QB2 (QB, DEN) OUT \u2014 late inactive",
+                            "SEA-QB3 (QB, SEA) OUT \u2014 late inactive"],
+            ref_deltas=[self._refd(0.14, 0.172)],
+            tier=1)
+        gate = D.verify_post_gate([delta], teams, personnel, espn, nv)
+        self.assertFalse(gate.allowed)
+        self.assertTrue(gate.hold_reasons)
+
+    def test_genuine_starter_out_allowed(self):
+        # Starter out in both feeds, backup active: legitimate alert.
+        teams = {"DEN": {"last_qb_id": "DEN-QB1"}}
+        personnel = {"DEN": {}}
+        nv = {"DEN": self._team([
+            self._qb("Bo Nix", "out", gsis_id="DEN-QB1"),
+            self._qb("Sam Ehlinger", "confirmed", gsis_id="DEN-QB2")])}
+        espn = {"DEN": self._team([
+            self._qb("Bo Nix", "out", espn_id="e1"),
+            self._qb("Sam Ehlinger", "confirmed", espn_id="e2")])}
+        delta = self._delta(
+            injury_changes=["DEN-QB1 (QB, DEN) OUT \u2014 late inactive"],
+            ref_deltas=[self._refd(0.02, 0.045)],
+            tier=1)
+        gate = D.verify_post_gate([delta], teams, personnel, espn, nv)
+        self.assertTrue(gate.allowed, gate.hold_reasons)
+        self.assertTrue(gate.verified)
+
+    def test_source_unavailable_holds(self):
+        delta = self._delta(
+            forecast_id="g2", away="KC", home="DEN",
+            injury_changes=["DEN-QB1 (QB, DEN) OUT \u2014 late inactive"],
+            ref_deltas=[self._refd(0.02, 0.04)],
+            tier=1)
+        gate = D.verify_post_gate(
+            [delta], {"DEN": {"last_qb_id": "DEN-QB1"}}, {"DEN": {}},
+            {"DEN": self._team([self._qb("Bo Nix", "out", espn_id="e1")])},
+            None)  # nflverse down
+        self.assertFalse(gate.allowed)
+        self.assertTrue(any("unavailable" in r for r in gate.hold_reasons))
+
+    def test_ordinary_tier1_bypasses_gate(self):
+        # 3.5% edge shift, no injury news: gate does not apply.
+        teams, personnel, nv, espn = self._thursday()
+        delta = self._delta(
+            injury_changes=[],
+            ref_deltas=[self._refd(0.01, 0.045)],
+            tier=1)
+        gate = D.verify_post_gate([delta], teams, personnel, espn, nv)
+        self.assertTrue(gate.allowed)
+        self.assertFalse(gate.hold_reasons)
+
+    def test_edge_tripwire_holds(self):
+        teams, personnel, nv, espn = self._thursday()
+        delta = self._delta(
+            injury_changes=["WR (DEN) OUT \u2014 newly inactive"],
+            ref_deltas=[self._refd(0.01, 0.08)],  # 7% shift
+            tier=1)
+        gate = D.verify_post_gate([delta], teams, personnel, espn, nv)
+        self.assertFalse(gate.allowed)
+        self.assertTrue(any("plausibility" in r for r in gate.hold_reasons))
+
+    def test_both_qbs_out_tripwire(self):
+        # Both starters genuinely out in both feeds -> still held.
+        teams = {"DEN": {"last_qb_id": "DEN-QB1"},
+                 "SEA": {"last_qb_id": "SEA-QB1"}}
+        personnel = {"DEN": {}, "SEA": {}}
+        nv = {
+            "DEN": self._team([self._qb("Bo Nix", "out", gsis_id="DEN-QB1")]),
+            "SEA": self._team([self._qb("Sam Darnold", "out", gsis_id="SEA-QB1")]),
+        }
+        espn = {
+            "DEN": self._team([self._qb("Bo Nix", "out", espn_id="e1")]),
+            "SEA": self._team([self._qb("Sam Darnold", "out", espn_id="e3")]),
+        }
+        delta = self._delta(
+            injury_changes=["DEN-QB1 (QB, DEN) OUT \u2014 late inactive",
+                            "SEA-QB1 (QB, SEA) OUT \u2014 late inactive"],
+            ref_deltas=[self._refd(0.02, 0.04)],
+            tier=1)
+        gate = D.verify_post_gate([delta], teams, personnel, espn, nv)
+        self.assertFalse(gate.allowed)
+        self.assertTrue(any("both teams" in r for r in gate.hold_reasons))
+
+    def test_qb_change_pattern_detected(self):
+        delta = self._delta(injury_changes=["DEN QB change: DEN-QB1 -> DEN-QB2"])
+        self.assertEqual(D._qb_out_claim_teams(delta), ["DEN"])
+        delta2 = self._delta(
+            injury_changes=["DEN-QB1 (QB, DEN) ACTIVE \u2014 was OUT"])
+        self.assertEqual(D._qb_out_claim_teams(delta2), [])
+
 
 if __name__ == "__main__":
     unittest.main()
