@@ -158,11 +158,14 @@ class TestWholeLineFallback(unittest.TestCase):
         self.assertEqual(ref["total"].source, "polymarket")
 
     def test_half_bovada_stays_primary(self):
-        ref = self._refs(_bovada(spread_line=-3.5, total_line=45.5),
+        # Fixture mu_total=45.0: use a deep-UNDER half line (gap 2.5 meets
+        # the UNDER_MIN_GAP floor) so the gate does not block this
+        # source-priority assertion.
+        ref = self._refs(_bovada(spread_line=-3.5, total_line=47.5),
                          _poly(spread_line=-3.0, total_line=48.0))
         self.assertEqual(abs(ref["spread"].line), 3.5)
         self.assertEqual(ref["spread"].source, "bovada")
-        self.assertEqual(ref["total"].line, 45.5)
+        self.assertEqual(ref["total"].line, 47.5)
         self.assertEqual(ref["total"].source, "bovada")
 
     def test_whole_bovada_without_half_poly_keeps_bovada(self):

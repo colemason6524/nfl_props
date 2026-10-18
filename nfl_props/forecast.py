@@ -11,6 +11,7 @@ from __future__ import annotations
 from dataclasses import asdict, dataclass, field
 from typing import Dict, List, Optional
 
+import os
 import sys
 
 import numpy as np
@@ -23,6 +24,22 @@ from .references import (BOVADA, POLYMARKET, ForecastReference,
 from .rivalry import live_rivalry_features
 from .sources.weather import live_weather_for
 from .version import FORECAST_MODEL_VERSION
+
+
+# Totals calibration 2026-10-18 (graded totals n=75 upside-only
+# miscalibration). UNDER_MIN_GAP is the midpoint between loser avg
+# model-under gap 1.9 and winner avg 3.5; marginal UNDERs below this
+# floor get no pick at all (side=None), so they can never be PLAYABLE
+# downstream. Enforced here rather than in references.py because with no
+# pick there is nothing to price -- a references-side gate would still
+# publish an under side with a probability.
+UNDER_MIN_GAP = float(os.environ.get("NFL_UNDER_MIN_GAP", "2.5"))
+# TOTAL_RESID_SCALE inflates ONLY positive total residuals at
+# probability time: graded upside P(err>+10)=0.347 vs fitted 0.2215
+# needs ~1.15x upside stretch, while the left tail already matches
+# (symmetric scaling would overshoot it). Fitted state residuals are
+# untouched.
+TOTAL_RESID_SCALE = float(os.environ.get("NFL_TOTAL_RESID_SCALE", "1.15"))
 
 
 def _clean(value) -> Optional[str]:
@@ -337,16 +354,25 @@ def build_game_forecast(game: dict, state: dict,
     # the forecast path reports honest-looking but dishonest probabilities.
     total_line, total_src = _resolve_line(bovada_game, poly, "total")
     if total_line is not None:
-        probs = game_total_probs(proj["mu_total"], rt, total_line)
+        rt_scaled = np.where(rt > 0, rt * TOTAL_RESID_SCALE, rt)
+        probs = game_total_probs(proj["mu_total"], rt_scaled, total_line)
         _gamma_total = state.get("prob_shrink", {}).get("total", 1.0)
         if proj["mu_total"] > total_line:
             side, p_model, opp = "over", shrink_prob(probs["p_over"], _gamma_total), "under"
-        else:
+            fc.references.append(build_reference(
+                "total", side, total_line, p_model, probs["p_push"],
+                _prices("total", side, opp, bovada_game, poly,
+                        include_bovada=(total_src == BOVADA))))
+        elif total_line - proj["mu_total"] >= UNDER_MIN_GAP:
             side, p_model, opp = "under", shrink_prob(probs["p_under"], _gamma_total), "over"
-        fc.references.append(build_reference(
-            "total", side, total_line, p_model, probs["p_push"],
-            _prices("total", side, opp, bovada_game, poly,
-                    include_bovada=(total_src == BOVADA))))
+            fc.references.append(build_reference(
+                "total", side, total_line, p_model, probs["p_push"],
+                _prices("total", side, opp, bovada_game, poly,
+                        include_bovada=(total_src == BOVADA))))
+        else:
+            fc.references.append(build_reference(
+                "total", None, total_line, None, probs["p_push"], [],
+                note="UNDER_GAP_BELOW_FLOOR"))
     else:
         fc.references.append(build_reference(
             "total", None, None, None, 0.0, [], note="no posted line"))
