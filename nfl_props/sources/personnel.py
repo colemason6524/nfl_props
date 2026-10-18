@@ -34,7 +34,8 @@ PERSONNEL_RAW_DIR = RAW_DIR / "personnel"
 VALID_QB_STATUSES = ("confirmed", "questionable", "out", "unknown")
 
 NEUTRAL = {"qb_status": "unknown", "key_out": [], "updated_at": None,
-           "source": None, "backup_qb_id": None, "starter_qb_id": None}
+           "source": None, "backup_qb_id": None, "starter_qb_id": None,
+           "qb_details": []}
 
 # Team abbreviation aliases: model uses WAS/LA, ESPN feed uses WSH/LAR
 TEAM_ALIASES = {

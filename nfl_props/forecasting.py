@@ -309,6 +309,100 @@ def fit_forecast_models(paired: pd.DataFrame, seasons: Sequence[int],
 # Live feature construction + projection
 # ---------------------------------------------------------------------------
 
+_QB_NAME_SUFFIXES = ("jr", "sr", "ii", "iii", "iv", "v")
+
+
+def _norm_qb_name(name) -> str:
+    """Normalize a QB name for cross-source matching ("Jalen Hurts" and
+    "J.Hurts" both -> "j.hurts"). Suffixes (Jr/III/...) are dropped."""
+    if not isinstance(name, str) or not name.strip():
+        return ""
+    parts = [part for part in name.replace(".", " ").split()
+             if part.lower() not in _QB_NAME_SUFFIXES]
+    if len(parts) >= 2:
+        return f"{parts[0][0]}.{parts[-1]}".lower()
+    return name.strip().lower()
+
+
+def _incumbent_qb_id(team_state: dict, qbs, personnel_ctx):
+    """The QB id priced absent injury news: the `starter_qb_id` override
+    when set and present in `qbs`, else the incumbent `last_qb_id`."""
+    override = (personnel_ctx or {}).get("starter_qb_id")
+    if override and override in qbs:
+        return override
+    return team_state.get("last_qb_id")
+
+
+def qb_starter_is_out(team_state: dict, qbs, personnel_ctx) -> bool:
+    """True when the priced starter is out.
+
+    Covers the feed-level blind spot where `_resolve_qb_status` reports
+    "confirmed" because a healthy backup sits on the injury report while
+    the actual starter is out (e.g. Hurts on IR with McKee confirmed):
+    the incumbent's normalized name is matched against the `qb_details`
+    "out" entries. Fail-open: unresolvable names keep the old behavior.
+    """
+    if not personnel_ctx:
+        return False
+    if personnel_ctx.get("qb_status") == "out":
+        return True
+    incumbent = _incumbent_qb_id(team_state, qbs, personnel_ctx)
+    if not incumbent:
+        return False
+    qb = qbs.get(incumbent) or {}
+    want = _norm_qb_name(qb.get("name"))
+    if not want:
+        return False
+    for detail in personnel_ctx.get("qb_details") or []:
+        if not isinstance(detail, dict):
+            continue
+        if str(detail.get("status", "")).lower() != "out":
+            continue
+        if _norm_qb_name(detail.get("name")) == want:
+            return True
+    return False
+
+
+def _confirmed_backup_qb_id(team, qbs, personnel_ctx, starter_id):
+    """Map a feed-"confirmed" QB to a gsis id for `team`.
+
+    Picks the confirmed QB with the most dropbacks among entries whose
+    normalized name matches a `qbs` id with `last_team == team`.
+    Returns None when nothing maps (fail-open to the dropbacks fallback).
+    """
+    details = personnel_ctx.get("qb_details") if personnel_ctx else None
+    if not details:
+        return None
+    current = _qb_current_season(qbs)
+    best_id, best_db = None, 0
+    for detail in details:
+        if not isinstance(detail, dict):
+            continue
+        if str(detail.get("status", "")).lower() != "confirmed":
+            continue
+        want = _norm_qb_name(detail.get("name"))
+        if not want:
+            continue
+        for qid, qb in qbs.items():
+            if qid == starter_id:
+                continue
+            if not isinstance(qb, dict):
+                continue
+            if qb.get("last_team") != team:
+                continue
+            if _norm_qb_name(qb.get("name")) != want:
+                continue
+            if not _qb_is_recent(qb, current):
+                continue
+            try:
+                db = int(qb.get("dropbacks", 0) or 0)
+            except (TypeError, ValueError):
+                continue
+            if db > best_db:
+                best_id, best_db = qid, db
+    return best_id
+
+
 def resolve_priced_qb_id(team: Optional[str], team_state: dict,
                          qbs: Dict[str, dict],
                          personnel_ctx: Optional[dict] = None
@@ -321,24 +415,28 @@ def resolve_priced_qb_id(team: Optional[str], team_state: dict,
     annotation-only. This is the returning-starter path: when a starter
     (e.g. Daniels) comes back, set `starter_qb_id` in personnel.json so
     the model stops pricing the fill-in `last_qb_id`.
-    When the starter is "out": prefer `backup_qb_id` when it carries
-    live dropbacks in `qbs`; else the second-most-dropbacks QB last seen
-    with this team (`last_team` linkage) among QBs active within
+    When the starter is out -- either `qb_status == "out"` or the
+    incumbent's name matching a `qb_details` "out" entry (the feed
+    reports "confirmed" whenever a healthy backup is listed, even with
+    the starter on IR): prefer `backup_qb_id` when it carries live
+    dropbacks in `qbs`; else a feed-"confirmed" QB mapped to a gsis id
+    for this team; else the second-most-dropbacks QB last seen with this
+    team (`last_team` linkage) among QBs active within
     `QB_RECENCY_WINDOW` seasons; else None, which prices as league average
     (`_qb_epa` contributes 0.0 for an unknown QB). The injured starter is
     never returned when out.
     """
-    starter_id = team_state.get("last_qb_id")
-    if not personnel_ctx or personnel_ctx.get("qb_status") != "out":
-        override = (personnel_ctx or {}).get("starter_qb_id")
-        if override and override in qbs:
-            return override
+    starter_id = _incumbent_qb_id(team_state, qbs, personnel_ctx)
+    if not qb_starter_is_out(team_state, qbs, personnel_ctx):
         return starter_id
-    backup_id = personnel_ctx.get("backup_qb_id")
+    backup_id = (personnel_ctx or {}).get("backup_qb_id")
     if backup_id and backup_id != starter_id:
         qb = qbs.get(backup_id)
         if qb is not None and qb.get("dropbacks", 0) > 0:
             return backup_id
+    confirmed = _confirmed_backup_qb_id(team, qbs, personnel_ctx, starter_id)
+    if confirmed:
+        return confirmed
     current = _qb_current_season(qbs)
     best_id, best_db = None, 0
     for qid, qb in qbs.items():
@@ -527,6 +625,13 @@ def rebuild_forecast_state(
     games, team_games, situational, qb_games = load_processed_v2()
     features, replay_state = replay_v2(games, team_games, situational,
                                        qb_games)
+    # qb_name is dirty in recent rows (holds the gsis id instead of the
+    # name); prefer rows carrying a real name for the id -> name map.
+    _name_rows = qb_games[qb_games["qb_name"].astype(str).str.match(
+        r"^\d{2}-\d+$") == False]  # noqa: E712
+    qb_name_map = (_name_rows[["qb_id", "qb_name"]]
+                   .drop_duplicates("qb_id", keep="last")
+                   .set_index("qb_id")["qb_name"].to_dict())
     rivalry = compute_rivalry_frame(games)
     weather = load_weather()
     personnel = load_personnel()
@@ -548,8 +653,9 @@ def rebuild_forecast_state(
         "league": {k: round(float(v), 5)
                    for k, v in replay_state["league"].items()},
         "teams": _export_teams(replay_state["teams"]),
-        "qbs": {qid: {k: (round(v, 5) if isinstance(v, float) else v)
-                      for k, v in q.items()}
+        "qbs": {qid: {**{k: (round(v, 5) if isinstance(v, float) else v)
+                            for k, v in q.items()},
+                      "name": qb_name_map.get(qid)}
                 for qid, q in replay_state["qbs"].items()},
         "personnel_available": bool(personnel),
         "personnel": personnel,

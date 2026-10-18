@@ -15,7 +15,7 @@ import sys
 
 import numpy as np
 
-from .forecasting import game_features, project
+from .forecasting import game_features, project, qb_starter_is_out
 from .injury_debit import team_injury_debit
 from .ratings.epa import game_total_probs, shrink_prob, spread_probs
 from .references import (BOVADA, POLYMARKET, ForecastReference,
@@ -249,11 +249,12 @@ def build_game_forecast(game: dict, state: dict,
         teams_state = state.get("teams", {})
         th = teams_state.get(home) or {}
         ta = teams_state.get(away) or {}
-        for team, starter, priced, slot in (
-                (home, th.get("last_qb_id"), priced_qb_h, "h"),
-                (away, ta.get("last_qb_id"), priced_qb_a, "a")):
+        qbs = state.get("qbs", {})
+        for team, tstate, starter, priced, slot in (
+                (home, th, th.get("last_qb_id"), priced_qb_h, "h"),
+                (away, ta, ta.get("last_qb_id"), priced_qb_a, "a")):
             ctx = personnel_context(team, cache=personnel)
-            substituted = (ctx.get("qb_status") == "out"
+            substituted = (qb_starter_is_out(tstate, qbs, ctx)
                            and priced is not None and priced != starter)
             debit, attribution = team_injury_debit(
                 ctx, priced_qb_substituted=substituted)
@@ -355,10 +356,14 @@ def build_game_forecast(game: dict, state: dict,
         fc.notes.append("prior-season carryover applied")
     if state.get("personnel_available"):
         from .sources.personnel import personnel_context
+        qbs = state.get("qbs", {})
+        teams_state = state.get("teams", {})
         for team in (home, away):
             ctx = personnel_context(team, cache=personnel)
-            if ctx.get("qb_status") in ("out", "questionable"):
-                fc.notes.append(f"{team} QB {ctx['qb_status']}")
+            if ctx.get("qb_status") == "questionable":
+                fc.notes.append(f"{team} QB questionable")
+            elif qb_starter_is_out(teams_state.get(team) or {}, qbs, ctx):
+                fc.notes.append(f"{team} QB out")
     # Phase D: structured observability fields are set at construction;
     # keep the notes line + pipeline log line for human-readable output.
     for team, _priced, _substituted, note, attribution in notes_pending:
