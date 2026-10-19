@@ -7,11 +7,13 @@ from nfl_props.sources.polymarket import _parse_event, _split_matchup
 from nfl_props.teams import normalize_team
 
 
-def _market(mtype, question, outcomes, prices):
-    return {
+def _market(mtype, question, outcomes, prices, **extra):
+    market = {
         "sportsMarketType": mtype, "question": question,
         "outcomes": outcomes, "outcomePrices": prices,
     }
+    market.update(extra)
+    return market
 
 
 def _event():
@@ -78,6 +80,95 @@ class TestParseEvent(unittest.TestCase):
                                 '["Cardinals", "Rams"]', '["0.5", "0.5"]')],
         }
         self.assertIsNone(_parse_event(event))
+
+
+class TestSpreadLadderTail(unittest.TestCase):
+    """Dead alternate-spread rungs must never be read as the main line.
+
+    2026-10-20 WAS @ SF: the ladder tail held
+    ``Spread: Commanders (-21.5)`` with ``bestBid`` null, ``liquidityNum``
+    0.05 and prices parked at 0.495/0.505. Because outcomes are
+    ["Commanders", "49ers"], the home (SF) price 0.505 gave the smallest
+    gap-to-even-money and won, producing a positive +21.5 home line (the
+    board showed SF +17.5 from a neighbouring dead rung).
+    """
+
+    def _dead_rung(self):
+        return _market(
+            "spreads", "Spread: Commanders (-21.5)",
+            '["Commanders", "49ers"]', '["0.495", "0.505"]',
+            line=-21.5, slug="nfl-was-sf-2026-10-20-spread-away-21pt5",
+            bestBid=None, bestAsk=0.99, volumeNum=10, liquidityNum=0.05)
+
+    def _live_rung(self):
+        return _market(
+            "spreads", "Spread: 49ers (-7.5)",
+            '["49ers", "Commanders"]', '["0.465", "0.535"]',
+            line=-7.5, slug="nfl-was-sf-2026-10-20-spread-home-7pt5",
+            bestBid=0.46, bestAsk=0.47, volumeNum=388413.2,
+            liquidityNum=3027110.42)
+
+    def _event(self, *markets):
+        return {"title": "Commanders vs. 49ers", "markets": list(markets)}
+
+    def test_dead_ladder_tail_cannot_win(self):
+        parsed = _parse_event(self._event(self._dead_rung(), self._live_rung()))
+        self.assertEqual(parsed["spread"]["line"], -7.5)
+        self.assertAlmostEqual(parsed["spread"]["home_decimal"], 2.1505,
+                               places=3)
+        self.assertAlmostEqual(parsed["spread"]["away_decimal"], 1.8692,
+                               places=3)
+
+    def test_rung_without_live_bid_is_skipped(self):
+        # Liquidity is ample but there is no bid, so the book is dead.
+        dead = _market(
+            "spreads", "Spread: Commanders (-21.5)",
+            '["Commanders", "49ers"]', '["0.495", "0.505"]',
+            line=-21.5, bestBid=None, bestAsk=0.99,
+            volumeNum=500000, liquidityNum=500000)
+        parsed = _parse_event(self._event(dead, self._live_rung()))
+        self.assertEqual(parsed["spread"]["line"], -7.5)
+
+    def test_rung_below_liquidity_floor_is_skipped(self):
+        # A bid exists but quoted liquidity is a dead-tail 71 dollars.
+        dead = _market(
+            "spreads", "Spread: Commanders (-17.5)",
+            '["Commanders", "49ers"]', '["0.495", "0.505"]',
+            line=-17.5, bestBid=0.02, bestAsk=0.05,
+            volumeNum=0, liquidityNum=71.45)
+        parsed = _parse_event(self._event(dead, self._live_rung()))
+        self.assertEqual(parsed["spread"]["line"], -7.5)
+
+    def test_dead_rung_alone_yields_no_spread(self):
+        parsed = _parse_event(self._event(self._dead_rung()))
+        # Only a moneyline-less, total-less, spread-less event.
+        self.assertIsNone(parsed)
+
+    def test_line_field_beats_question_regex(self):
+        # Canonical `line` for outcomes[0] wins over the scraped question.
+        market = _market(
+            "spreads", "Spread: 49ers (-7.5)",
+            '["49ers", "Commanders"]', '["0.465", "0.535"]',
+            line=-6.5, bestBid=0.55, bestAsk=0.56,
+            volumeNum=1000, liquidityNum=1500000)
+        parsed = _parse_event(self._event(market))
+        self.assertEqual(parsed["spread"]["line"], -6.5)
+
+    def test_near_tie_breaks_toward_smallest_line(self):
+        # Both rungs are effectively at even money; take the shorter line
+        # instead of letting gap noise decide.
+        short = _market(
+            "spreads", "Spread: 49ers (-7.5)",
+            '["49ers", "Commanders"]', '["0.465", "0.535"]',
+            line=-7.5, bestBid=0.46, bestAsk=0.47,
+            volumeNum=1000, liquidityNum=3000000)
+        deep = _market(
+            "spreads", "Spread: 49ers (-17.5)",
+            '["49ers", "Commanders"]', '["0.47", "0.53"]',
+            line=-17.5, bestBid=0.46, bestAsk=0.48,
+            volumeNum=1000, liquidityNum=38289.21)
+        parsed = _parse_event(self._event(short, deep))
+        self.assertEqual(parsed["spread"]["line"], -7.5)
 
 
 if __name__ == "__main__":

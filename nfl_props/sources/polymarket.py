@@ -27,6 +27,20 @@ _TOTAL_LINE = re.compile(r"O/U\s*([0-9]+(?:\.[0-9]+)?)")
 _SPREAD_LINE = re.compile(r"([+-]?[0-9]+(?:\.[0-9]+)?)")
 _SPREAD_TEAM = re.compile(r"Spread:\s*(.+?)\s*\(", re.IGNORECASE)
 
+# Alternate-spread ladders carry dead rungs at the tail: no live book, ~zero
+# quoted liquidity, yet their outcomePrices can still read 0.495/0.505 and so
+# beat the real main line on gap-to-even-money. Observed dead rungs quote
+# liquidityNum 0.05-71 while live rungs quote 29k-3M, so require a live bid
+# plus at least this much quoted liquidity before a rung is eligible.
+_SPREAD_MIN_LIQUIDITY = 1000.0
+# Near-tie window (in probability points) for rung selection. The genuine
+# main line is the rung closest to even money; this only decides between
+# rungs that are effectively tied there, and the tie goes to the smallest
+# |line| so a ladder tail can never win on a rounding difference. Kept tight
+# (one price point): a wide window would sweep in the whole near-even cluster
+# of a 30+ rung ladder and bias the pick toward the ladder's short end.
+_SPREAD_GAP_TOLERANCE = 0.01
+
 
 def _get(url: str) -> Optional[object]:
     req = urllib.request.Request(url, headers={
@@ -51,6 +65,49 @@ def _split_matchup(text: str) -> Optional[Tuple[str, str]]:
     return None
 
 
+def _num(value) -> Optional[float]:
+    """Best-effort float; None for absent/blank/non-numeric values."""
+    if value is None or value == "":
+        return None
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _book_is_live(market: dict) -> bool:
+    """False for dead ladder tails: no live bid or ~zero quoted liquidity."""
+    if "bestBid" in market:
+        bid = _num(market.get("bestBid"))
+        if bid is None or bid <= 0.0:
+            return False
+    if "liquidityNum" in market:
+        liquidity = _num(market.get("liquidityNum"))
+        if liquidity is not None and liquidity < _SPREAD_MIN_LIQUIDITY:
+            return False
+    return True
+
+
+def _spread_rung(market: dict, outcomes: List[str], question: str
+                 ) -> Tuple[Optional[float], Optional[str]]:
+    """(signed line, team it is quoted for) for one spread rung.
+
+    Polymarket's own `line` field is the canonical signed handicap of
+    outcomes[0], so prefer it. Fall back to scraping the question text only
+    for older captured payloads that never carried the field.
+    """
+    canonical = _num(market.get("line"))
+    if canonical is not None:
+        return canonical, normalize_team(outcomes[0])
+    match = _SPREAD_LINE.search(question)
+    if not match:
+        return None, None
+    team_match = _SPREAD_TEAM.search(question)
+    line_team = (normalize_team(team_match.group(1))
+                 if team_match else normalize_team(outcomes[0]))
+    return float(match.group(1)), line_team
+
+
 def _ref(family: str, side: str, line: Optional[float], decimal: float) -> dict:
     return {
         "family": family, "side": side, "line": line,
@@ -70,8 +127,7 @@ def _parse_event(event: dict) -> Optional[dict]:
     ml_refs: List[dict] = []
     best_total: Optional[dict] = None
     best_total_gap = 1.0
-    spread: Optional[dict] = None
-    best_spread_gap = 1.0
+    spread_candidates: List[dict] = []
     for market in event.get("markets") or []:
         mtype = str(market.get("sportsMarketType") or "").lower()
         try:
@@ -109,9 +165,12 @@ def _parse_event(event: dict) -> Optional[dict]:
                     "over_p": round(p_over, 4),
                 }
         elif mtype == "spreads" and len(outcomes) == 2 and len(prices) == 2:
+            if not _book_is_live(market):
+                continue
             question = str(market.get("question") or "")
-            match = _SPREAD_LINE.search(question)
-            if not match:
+            line, handicap_team = _spread_rung(
+                market, [str(o) for o in outcomes], question)
+            if line is None:
                 continue
             price_by_team = {}
             for name, price in zip(outcomes, prices):
@@ -120,26 +179,30 @@ def _parse_event(event: dict) -> Optional[dict]:
                     price_by_team[canon] = float(price)
             if home not in price_by_team or away not in price_by_team:
                 continue
-            # The question names the handicapped team next to the number
-            # (e.g. "Spread: Cowboys (-2.5)"); outcomes[0] is that team too.
-            team_match = _SPREAD_TEAM.search(question)
-            handicap_team = (normalize_team(team_match.group(1))
-                             if team_match else None)
-            if handicap_team is None:
-                handicap_team = normalize_team(outcomes[0])
-            line = float(match.group(1))
+            # The line is quoted for one team (outcomes[0] when the market
+            # carries its own `line`; otherwise the team named in the
+            # question, e.g. "Spread: Cowboys (-2.5)").
             home_line = -abs(line) if handicap_team == home else abs(line)
-            # The main line is the market closest to even money.
+            # The main line is the market closest to even money; keep every
+            # eligible rung so near-ties can be broken deterministically.
             gap = abs(price_by_team[home] - 0.5)
-            if gap < best_spread_gap:
-                best_spread_gap = gap
-                spread = {
+            if gap < 1.0:
+                spread_candidates.append({
                     "line": home_line,
+                    "gap": gap,
+                    "size": abs(home_line),
                     "home_decimal": round(1.0 / price_by_team[home], 4)
                     if price_by_team[home] > 0 else None,
                     "away_decimal": round(1.0 / price_by_team[away], 4)
                     if price_by_team[away] > 0 else None,
-                }
+                })
+    spread: Optional[dict] = None
+    if spread_candidates:
+        best_gap = min(c["gap"] for c in spread_candidates)
+        near = [c for c in spread_candidates
+                if c["gap"] <= best_gap + _SPREAD_GAP_TOLERANCE]
+        pick = min(near, key=lambda c: (c["size"], c["gap"]))
+        spread = {k: pick[k] for k in ("line", "home_decimal", "away_decimal")}
     if not ml_refs and not best_total and not spread:
         return None
     return {"away": away, "home": home, "moneyline": ml_refs,

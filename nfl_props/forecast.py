@@ -161,6 +161,23 @@ def _is_whole_line(line: Optional[float]) -> bool:
     return line is not None and float(line).is_integer()
 
 
+def _line_matches(poly_line: Optional[float], line: float,
+                  tolerance: float = 1.0) -> bool:
+    """True when a Polymarket half-point line is a sane upgrade of `line`.
+
+    Both must point the same way (0.0 counts as agreeing with either sign)
+    and sit within `tolerance` points of each other. Polymarket's alternate
+    spread ladder can hand back a rung many points away from the Bovada line
+    (and on the wrong side of it), so a sign flip or a 10+ point jump must
+    never be accepted as a half-point upgrade.
+    """
+    if poly_line is None:
+        return False
+    if line * poly_line < 0:
+        return False
+    return abs(poly_line - line) <= tolerance
+
+
 def _poly_line(poly: Optional[dict], family: str) -> Optional[float]:
     if not poly:
         return None
@@ -187,7 +204,8 @@ def _resolve_line(bovada_game, poly: Optional[dict], family: str
         return None, None
     if _is_whole_line(line):
         poly_line = _poly_line(poly, family)
-        if poly_line is not None and not _is_whole_line(poly_line):
+        if (poly_line is not None and not _is_whole_line(poly_line)
+                and _line_matches(poly_line, line)):
             return poly_line, POLYMARKET
     return line, BOVADA
 

@@ -9,7 +9,7 @@ from pathlib import Path
 
 import numpy as np
 
-from nfl_props.forecast import build_game_forecast
+from nfl_props.forecast import _resolve_line, build_game_forecast
 from nfl_props.forecast_board import build_board
 from nfl_props.forecasting import FEATURE_SETS
 from nfl_props.references import (NO_VALUE, PLAYABLE, UNPRICED, build_reference)
@@ -184,6 +184,50 @@ class TestWholeLineFallback(unittest.TestCase):
                   spread=(1.90, 1.95), total=(1.90, 1.95)))
         self.assertIn(ref["spread"].decimal, (1.90, 1.95))
         self.assertIn(ref["total"].decimal, (1.90, 1.95))
+
+
+class TestSpreadLineGuard(unittest.TestCase):
+    """A Polymarket half-point must be a sane neighbour of the Bovada line.
+
+    2026-10-20 WAS @ SF: Bovada posted the correct whole line SF -7.0, and a
+    dead Polymarket ladder tail reported the home line as +17.5. The old
+    fallback accepted it because it was not a whole number, turning a -7.0
+    spread into +17.5.
+    """
+
+    def setUp(self):
+        self.state = _fake_state()
+
+    def _refs(self, bovada_game, poly):
+        fc = build_game_forecast(_game(), self.state, bovada_game=bovada_game,
+                                 poly=poly)
+        return {r.family: r for r in fc.references}
+
+    def _resolved(self, bovada_line, poly_line):
+        return _resolve_line(_bovada(spread_line=bovada_line),
+                             _poly(spread_line=poly_line), "spread")
+
+    def test_sign_flipped_poly_spread_is_rejected(self):
+        self.assertEqual(self._resolved(-7.0, 17.5), (-7.0, "bovada"))
+
+    def test_far_poly_spread_is_rejected(self):
+        self.assertEqual(self._resolved(-7.0, -18.5), (-7.0, "bovada"))
+
+    def test_neighbouring_half_point_is_used(self):
+        self.assertEqual(self._resolved(-7.0, -7.5), (-7.5, "polymarket"))
+
+    def test_reference_keeps_bovada_on_sign_flip(self):
+        # End to end: the rejected +17.5 must not reach the board reference.
+        ref = self._refs(_bovada(spread_line=-7.0, total_line=48.0),
+                         _poly(spread_line=17.5, total_line=47.5))
+        self.assertEqual(abs(ref["spread"].line), 7.0)
+        self.assertEqual(ref["spread"].source, "bovada")
+
+    def test_reference_uses_neighbouring_half_point(self):
+        ref = self._refs(_bovada(spread_line=-7.0, total_line=48.0),
+                         _poly(spread_line=-7.5, total_line=47.5))
+        self.assertEqual(abs(ref["spread"].line), 7.5)
+        self.assertEqual(ref["spread"].source, "polymarket")
 
 
 class TestReferences(unittest.TestCase):
