@@ -66,8 +66,10 @@ class PersonnelSchemaTest(unittest.TestCase):
         ctx = personnel_context("KC", cache=cache)
         self.assertTrue(ctx["personnel_available"])
         self.assertEqual(ctx["key_out"],
-                         [{"position": "WR1", "player_id": None},
-                          {"position": "LT", "player_id": None}])
+                         [{"position": "WR1", "player_id": None,
+                           "starter": None, "name": None},
+                          {"position": "LT", "player_id": None,
+                           "starter": None, "name": None}])
 
     def test_new_dict_key_out_and_backup_qb_id_round_trip(self):
         cache = {"BUF": {"qb_status": "questionable",
@@ -79,18 +81,22 @@ class PersonnelSchemaTest(unittest.TestCase):
         self.assertTrue(ctx["personnel_available"])
         self.assertEqual(ctx["qb_status"], "questionable")
         self.assertEqual(ctx["key_out"],
-                         [{"position": "WR1", "player_id": "BUF_WR_01"}])
+                         [{"position": "WR1", "player_id": "BUF_WR_01",
+                           "starter": None, "name": None}])
         self.assertEqual(ctx["backup_qb_id"], "BUF_QB_02")
 
     def test_normalize_key_out_helper(self):
         self.assertEqual(normalize_key_out(None), [])
         self.assertEqual(normalize_key_out("WR1"),
-                         [{"position": "WR1", "player_id": None}])
+                         [{"position": "WR1", "player_id": None,
+                           "starter": None, "name": None}])
         self.assertEqual(
             normalize_key_out([{"position": "RB1", "player_id": "X"},
                                "WR2", 42, None]),
-            [{"position": "RB1", "player_id": "X"},
-             {"position": "WR2", "player_id": None}])
+            [{"position": "RB1", "player_id": "X",
+              "starter": None, "name": None},
+             {"position": "WR2", "player_id": None,
+              "starter": None, "name": None}])
 
     def test_unknown_team_stays_neutral(self):
         ctx = personnel_context("ZZZ", cache={"KC": {"qb_status": "out"}})
