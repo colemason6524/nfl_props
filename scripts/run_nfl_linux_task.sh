@@ -29,7 +29,9 @@ case "$TASK" in
     board)
         LOG_FILE="$LOG_DIR/nfl_forecast.log"
         TIMEOUT=45m
-        COMMAND=("$PYTHON_EXE" run_forecast_board.py --rebuild-state --discord)
+        # Depth chart first (fail-open) so injury debits know starter vs
+        # backup; the board itself must run even if the refresh fails.
+        COMMAND=(bash -c '"$1" scripts/refresh_depth_chart.py || true; "$1" run_forecast_board.py --rebuild-state --discord' _ "$PYTHON_EXE")
         REQUIRED_SECRET=NFL_DISCORD_WEBHOOK_URL
         ;;
     wave)

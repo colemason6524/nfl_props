@@ -344,18 +344,25 @@ def qb_starter_is_out(team_state: dict, qbs, personnel_ctx) -> bool:
     """
     if not personnel_ctx:
         return False
-    if personnel_ctx.get("qb_status") == "out":
-        return True
     incumbent = _incumbent_qb_id(team_state, qbs, personnel_ctx)
+    details = [d for d in (personnel_ctx.get("qb_details") or [])
+               if isinstance(d, dict)]
+    if personnel_ctx.get("qb_status") == "out":
+        # The aggregate is only trustworthy when nothing can be matched:
+        # a lone backup QB being out sets qb_status="out" too (SF 2026-10-19:
+        # Rourke QB3 out flagged the whole team). Distrust it whenever the
+        # incumbent can be named and the feed carries detail rows.
+        inc_qb = qbs.get(incumbent) or {} if incumbent else {}
+        if (not incumbent or not _norm_qb_name(inc_qb.get("name"))
+                or not details):
+            return True
     if not incumbent:
         return False
     qb = qbs.get(incumbent) or {}
     want = _norm_qb_name(qb.get("name"))
     if not want:
         return False
-    for detail in personnel_ctx.get("qb_details") or []:
-        if not isinstance(detail, dict):
-            continue
+    for detail in details:
         if str(detail.get("status", "")).lower() != "out":
             continue
         if _norm_qb_name(detail.get("name")) == want:
@@ -422,9 +429,10 @@ def resolve_priced_qb_id(team: Optional[str], team_state: dict,
     dropbacks in `qbs`; else a feed-"confirmed" QB mapped to a gsis id
     for this team; else the second-most-dropbacks QB last seen with this
     team (`last_team` linkage) among QBs active within
-    `QB_RECENCY_WINDOW` seasons; else None, which prices as league average
-    (`_qb_epa` contributes 0.0 for an unknown QB). The injured starter is
-    never returned when out.
+    `QB_RECENCY_WINDOW` seasons *and* in the current season (`last_season`
+    absent stays eligible, for fixtures); else None, which prices as league
+    average (`_qb_epa` contributes 0.0 for an unknown QB). The injured
+    starter is never returned when out.
     """
     starter_id = _incumbent_qb_id(team_state, qbs, personnel_ctx)
     if not qb_starter_is_out(team_state, qbs, personnel_ctx):
@@ -446,6 +454,16 @@ def resolve_priced_qb_id(team: Optional[str], team_state: dict,
             continue
         if not _qb_is_recent(qb, current):
             continue
+        # Last-resort only: a QB whose last season predates the current one
+        # is not a live fill-in (SF 2026-10-19 priced ex-starter Mac Jones
+        # over incumbent Purdy off raw dropbacks). Missing last_season
+        # (fixtures, legacy states) stays eligible.
+        try:
+            last_season = qb.get("last_season")
+            if last_season is not None and int(last_season) < current:
+                continue
+        except (TypeError, ValueError):
+            pass
         try:
             db = int(qb.get("dropbacks", 0) or 0)
         except (TypeError, ValueError):

@@ -13,7 +13,9 @@ gap plus confirmed non-QB outs. Everything is conservative by construction:
 positions, and questionable designations all yield (0.0, []). Questionable
 is annotation-only and NEVER debits. QB entries inside `key_out` are
 ignored (the QB is covered by the qb_status residual only, no
-double-count).
+double-count). Entries the depth chart resolved to a backup
+(`starter` is False) are skipped: a backup being inactive never debits.
+`starter` True or None (unknown) keeps the historical behavior.
 """
 from __future__ import annotations
 
@@ -87,6 +89,9 @@ def team_injury_debit(personnel_ctx,
     groups: dict = {}
     for entry in entries:
         if not isinstance(entry, dict):
+            continue
+        if entry.get("starter") is False:
+            # Backup inactive: immaterial. None (unknown) still debits.
             continue
         hit = _classify(entry.get("position"))
         if hit is None:

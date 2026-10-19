@@ -21,6 +21,10 @@ Conservative mapping notes:
 - `key_out` carries OUT-status non-QBs only (position-mapped; the debit
   classifier ignores TE/K/P etc. by design -- conservative, no double
   count with the QB residual).
+- `key_out` entries carry `name` + `athlete_id` (ESPN) or `name` +
+  `player_id`=gsis_id (nflverse) so the depth-chart crosswalk can resolve
+  them; `_annotate_starters()` then sets `starter` (True/False/None) from
+  the cached index and the debit model skips resolved backups.
 - `backup_qb_id` is left None: the feed has no depth-chart source, and the
   forecast already falls back to the most-used teammate (`last_team`
   linkage). A wrong explicit backup would be worse than none.
@@ -153,6 +157,10 @@ def parse_espn_payload(payload: dict,
                     "name": athlete.get("displayName"),
                     "espn_id": str(inj.get("id"))
                     if inj.get("id") is not None else None,
+                    # inj["id"] is the injury-record id, not the athlete id;
+                    # athlete["id"] is what the depth chart crosswalk needs.
+                    "athlete_id": str(athlete.get("id"))
+                    if athlete.get("id") is not None else None,
                     "status": status,
                 })
             else:
@@ -162,7 +170,10 @@ def parse_espn_payload(payload: dict,
                     entry["key_out"].append(
                         {"position": pos,
                          "player_id": str(inj.get("id"))
-                         if inj.get("id") is not None else None})
+                         if inj.get("id") is not None else None,
+                         "athlete_id": str(athlete.get("id"))
+                         if athlete.get("id") is not None else None,
+                         "name": athlete.get("displayName")})
     if not teams:
         raise PersonnelFeedError("ESPN payload produced zero teams")
     _resolve_qb_status(teams)
@@ -211,7 +222,8 @@ def parse_nflverse_csv(text: str, source: str = SOURCE_NFLVERSE,
                 entry["qb_status"] = "confirmed"
             if status == "out" and pos:
                 entry["key_out"].append(
-                    {"position": pos, "player_id": r.get("gsis_id")})
+                    {"position": pos, "player_id": r.get("gsis_id"),
+                     "name": r.get("full_name") or r.get("player_name")})
     if not teams:
         raise PersonnelFeedError("nflverse CSV produced zero teams")
     _resolve_qb_status(teams)
@@ -251,6 +263,36 @@ def fetch_nflverse_teams(now: Optional[datetime] = None) -> Dict[str, dict]:
         except PersonnelFeedError as exc:
             last_err = exc
     raise PersonnelFeedError(f"nflverse fallback failed: {last_err}")
+
+
+def _annotate_starters(teams: Dict[str, dict]) -> None:
+    """Set `starter` on each key_out entry from the cached depth chart.
+
+    Read-only against `data/processed/depth_chart.json` (never downloads:
+    `scripts/refresh_depth_chart.py` owns the pull). Per-team try/except
+    keeps a depth-chart problem from breaking the injury pull: an unset
+    flag means None = unknown = the pre-starter-aware behavior.
+    """
+    try:
+        from . import depth
+        index = depth.load_index()
+    except Exception:
+        return
+    if not index:
+        return
+    for team, entry in teams.items():
+        if not isinstance(entry, dict):
+            continue
+        try:
+            for item in entry.get("key_out") or []:
+                if not isinstance(item, dict):
+                    continue
+                item["starter"] = depth.is_starter(
+                    team, item.get("position"),
+                    item.get("player_id") or item.get("athlete_id"),
+                    item.get("name"), index)
+        except Exception:
+            continue
 
 
 def _atomic_write_json(path, obj: dict) -> None:
@@ -304,6 +346,8 @@ def fetch_and_store(now: Optional[datetime] = None,
         entry.setdefault("starter_qb_id", None)
         entry["source"] = source
         entry["updated_at"] = now.isoformat()
+    # Starter/backup attribution from the cached depth chart (no download).
+    _annotate_starters(teams)
     _atomic_write_json(PERSONNEL_PATH, teams)
     if archive_raw:
         try:

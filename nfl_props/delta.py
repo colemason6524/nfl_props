@@ -207,14 +207,29 @@ def diff_references(old_refs: List[dict],
 
 
 def _trace_players(trace: List[dict]) -> Dict[tuple, dict]:
-    """Index injury trace entries by (team, position-label)."""
+    """Index injury trace entries by (team, position-label).
+
+    The depth-chart `starter` flag rides along on the indexed attr. When a
+    starter and a backup share one position label, the starter wins so a
+    backup entry can neither hide nor overwrite a starter entry.
+    """
     out: Dict[tuple, dict] = {}
     for entry in trace or []:
         team = entry.get("team")
         for attr in entry.get("attribution") or []:
             pos = attr.get("position")
-            if team and pos:
-                out[(team, str(pos).upper())] = attr
+            if not (team and pos):
+                continue
+            key = (team, str(pos).upper())
+            attr = dict(attr)
+            attr.setdefault("starter", entry.get("starter"))
+            existing = out.get(key)
+            if existing is not None:
+                if existing.get("starter") is True:
+                    continue
+                if attr.get("starter") is not True:
+                    continue
+            out[key] = attr
     return out
 
 
@@ -246,6 +261,11 @@ def diff_injuries(old_fc, new_fc) -> List[str]:
     new_players = _trace_players(getattr(new_fc, "injury_trace", None) or [])
     for key in sorted(set(new_players) - set(old_players)):
         team, pos = key
+        if new_players[key].get("starter") is False:
+            # Depth chart says backup: immaterial, never material news.
+            changes.append(f"{pos} ({team}) OUT — backup inactive "
+                           f"(immaterial)")
+            continue
         changes.append(f"{pos} ({team}) OUT — newly inactive")
     for key in sorted(set(old_players) - set(new_players)):
         team, pos = key
@@ -288,6 +308,8 @@ def _is_key_player_news(delta: GameDelta) -> bool:
     debit moves by >= KEY_DEBIT_MOVE (meaningful on-field impact).
     """
     for change in delta.injury_changes:
+        if "(backup inactive" in change:
+            continue  # backup inactives are immaterial by construction
         if "(QB" in change:
             return True
     home_move = abs(delta.debit_new_home - delta.debit_old_home)

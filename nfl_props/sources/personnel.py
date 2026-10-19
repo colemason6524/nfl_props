@@ -54,12 +54,13 @@ def normalize_team(team: Optional[str]) -> Optional[str]:
 
 
 def normalize_key_out(entries) -> List[dict]:
-    """Normalize `key_out` entries to `{"position", "player_id"}` dicts.
+    """Normalize `key_out` entries to `{"position", "player_id", ...}` dicts.
 
     Legacy plain-string entries (e.g. `"WR1"`) become
-    `{"position": "WR1", "player_id": None}`. Dict entries keep their
-    position and optional player_id. Non-string/non-dict entries
-    (e.g. numbers, None) are dropped (fail-open).
+    `{"position": "WR1", "player_id": None, "starter": None, "name": None}`.
+    Dict entries keep their position, optional player_id, and the optional
+    depth-chart `starter` flag / player `name` used for starter attribution.
+    Non-string/non-dict entries (e.g. numbers, None) are dropped (fail-open).
     """
     if entries is None:
         return []
@@ -72,10 +73,13 @@ def normalize_key_out(entries) -> List[dict]:
     normalized = []
     for entry in items:
         if isinstance(entry, str):
-            normalized.append({"position": entry, "player_id": None})
+            normalized.append({"position": entry, "player_id": None,
+                               "starter": None, "name": None})
         elif isinstance(entry, dict):
             normalized.append({"position": entry.get("position"),
-                               "player_id": entry.get("player_id")})
+                               "player_id": entry.get("player_id"),
+                               "starter": entry.get("starter"),
+                               "name": entry.get("name")})
         # else: drop non-string/non-dict entries (fail-open)
     return normalized
 
