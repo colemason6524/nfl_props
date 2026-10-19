@@ -646,6 +646,7 @@ def run_delta_check(now: Optional[datetime] = None,
     message = format_alert(deltas, now_et)
     result.message = message
     gate = _run_post_gate(firing, state)
+    from .utils import log
     if not gate.allowed:
         result.gate_held = True
         result.hold_reasons = gate.hold_reasons
