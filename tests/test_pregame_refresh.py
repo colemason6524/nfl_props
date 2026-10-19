@@ -111,8 +111,7 @@ class ParseNflverseTest(unittest.TestCase):
         self.assertEqual(teams["KC"]["key_out"], [])  # week-4 WR excluded
         self.assertEqual(
             teams["DEN"]["key_out"],
-            [{"position": "WR", "player_id": "00-3",
-              "name": teams["DEN"]["key_out"][0]["name"]}])
+            [{"position": "WR", "player_id": "00-3", "name": "Wide W"}])
         self.assertNotIn("PRE", str(teams))
 
     def test_empty_csv_raises(self):
