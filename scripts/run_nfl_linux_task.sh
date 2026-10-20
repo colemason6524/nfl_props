@@ -64,6 +64,14 @@ case "$TASK" in
         COMMAND=(bash -c '"$1" -c "from nfl_props.sources.nflverse import refresh_data; refresh_data(seasons=[])" && "$1" grade_forecast.py --weekly --discord' _ "$PYTHON_EXE")
         REQUIRED_SECRET=NFL_DISCORD_WEBHOOK_URL
         ;;
+    delta_check)
+        LOG_FILE="$LOG_DIR/nfl_delta_check.log"
+        TIMEOUT=30m
+        # Pre-kickoff injury delta check: recompute forecast with latest
+        # injury data, compare against last board, fire tiered alerts.
+        COMMAND=("$PYTHON_EXE" -c "from nfl_props.delta import run_delta_check; run_delta_check()")
+        REQUIRED_SECRET=NFL_DISCORD_WEBHOOK_URL
+        ;;
     *)
         printf 'Unknown task: %s\n' "$TASK" >&2
         exit 2
