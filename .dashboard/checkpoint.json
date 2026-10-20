@@ -1,9 +1,9 @@
 {
   "schema_version": 1,
   "project_id": "nfl_props",
-  "updated_at": "2026-10-18T16:48:18+00:00",
+  "updated_at": "2026-10-20T04:34:37+00:00",
   "status": "observing",
-  "summary": "Totals calibration shipped 44e92fa: UNDER gap gate (>=2.5, side=None + UNDER_GAP_BELOW_FLOOR so marginal UNDERs never PLAYABLE), upside-only total resid scale 1.15 (TOTAL_MODEL_VERSION v3). Divisional-spread discount NOT implemented - methodology backtest shows no divisional margin bias (div MAE 10.419 vs nondiv 10.180). 212 tests pass incl 5 new gate tests. Spread logic untouched.",
+  "summary": "Three fixes shipped 2026-10-19 evening: (1) Polymarket spread bug (4dbe8d7): dead-rung ladder rows were picked as main spread (SF showed +17.5 vs real -7.5); parser now prefers canonical line, skips non-live rungs; _line_matches requires sign+distance agreement with Bovada. 2026-10-19 WAS@SF snapshot corrected 17.5 -> -7.5 so it grades right. BUF@LV 2026-10-18 snapshot has same signature, flagged uncorrected. (2) Starter-aware injury fix (71ac45f): QB3 Rourke OUT no longer debits SF or displaces Purdy; SF debit -2.7 -> -0.2. (3) Wrapper delta_check task added (d3895d5) so TNF/SNF/MNF checks run through the wrapper with env loaded.",
   "experiment": null,
   "watching_for": null,
   "next_action": null,
@@ -11,9 +11,9 @@
   "git_commit": "",
   "check_back": {
     "kind": "grade_event",
-    "label": "totals-calibration",
+    "label": "nfl-spread-starter-delta-fixes",
     "target": null,
-    "baseline": "2026-10-18T16:48:18+00:00",
+    "baseline": "2026-10-20T04:34:37+00:00",
     "events": [],
     "target_date": null,
     "monitoring": false
