@@ -51,8 +51,9 @@ def send_discord_embeds(webhook_url: str, embeds: List[dict]) -> SendResult:
     if not embeds:
         return SendResult(ok=True)  # nothing to send is success, not failure
     body = json.dumps({"embeds": embeds}).encode("utf-8")
+    # NOTE 2026-10-19: Discord/Cloudflare 403s the default Python-urllib UA from this VM (verified live). A real UA is required to post.
     req = Request(webhook_url, data=body,
-                  headers={"Content-Type": "application/json"})
+                  headers={"Content-Type": "application/json", "User-Agent": "nfl-props/discord-post"})
     try:
         with urlopen(req, timeout=HTTP_TIMEOUT_SECONDS) as resp:
             return SendResult(ok=200 <= resp.status < 300,
