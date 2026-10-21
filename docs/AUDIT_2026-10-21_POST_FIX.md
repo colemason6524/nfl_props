@@ -124,3 +124,94 @@ This is the important negative result: on totals the edge score carries no usabl
 - **n≈230 post-fix totals** (≈19 weeks): enough for 80% power to separate the post-fix rate from the pre-fix -15.7%. The program will realistically never have that, so decisions must be made on the block test above, not on significance.
 - **A post-fix spread misprice** (edge ≥ 20% with no manual repair): would mean candidate 2's risk is still live and 4dbe8d7 is incomplete.
 - **A shift in PLAYABLE/spread** (currently +1.67u, n=73): it is the block keeping the season near break-even. If it turns, the board is negative on every family.
+
+## Fix landed: EV/edge ceiling (2026-10-21)
+
+Candidate 1 shipped. Commits: `32a9a33` (failing tests), `2b51cbd`
+(guard). Full suite `224 tests, OK` (215 before + 9 new); no other
+threshold, tier, or gate touched.
+
+### What shipped
+
+- `nfl_props/forecast.py`: `EDGE_CEILING = 0.20`, `EV_CEILING = 0.30`
+  (`NFL_EDGE_CEILING`, `NFL_EV_CEILING` env overrides),
+  `DEAD_LINE_SUSPECT = "DEAD_LINE_SUSPECT"`, and
+  `apply_edge_ceiling(ref, game)`.
+- Applied to every `fc.references` at the end of `build_game_forecast`.
+  A ref that is currently `PLAYABLE` and has `|edge| >= 0.20` or
+  `|ev| >= 0.30` becomes `NO_VALUE`, keeps its prices/probabilities, and
+  gets `DEAD_LINE_SUSPECT` appended to `note`. Nothing is dropped from
+  the board artifact or the ledger, so the hit count stays observable.
+- Each demotion logs
+  `[edge-ceiling] <game> <family> <side> line=... p_model=... edge=+0.0000 ev=+0.0000 DEAD_LINE_SUSPECT`
+  to stderr at build time.
+
+Status is assigned in `nfl_props/references.py` (`status_for`,
+`build_reference`), which the forecast path shares with the retired
+legacy board, so the guard was placed at the forecast build chokepoint
+(`build_game_forecast`) instead of in the shared status function.
+`references.py` is untouched; legacy tiers and the UNDER gap gate are
+unchanged.
+
+### Dry run (read-only, no writes)
+
+Replayed 5 board artifacts (Oct 18 15:00Z, 18:47Z, 19:37Z; Oct 19
+22:02Z, 23:15Z) plus the 36 picks in `outputs/snapshots/2026-10-18`
+and `2026-10-19` through `apply_edge_ceiling` on the VM. Scratch
+script `/tmp/nfl_edge_ceiling_dryrun.py`, not committed; no artifact,
+snapshot, or ledger file was written.
+
+- 15:00Z: 33 rows, 4 demoted
+- 18:47Z: 12 rows, 3 demoted
+- 19:37Z: 12 rows, 3 demoted
+- 22:02Z: 3 rows, 2 demoted
+- 23:15Z: 3 rows, 2 demoted
+- snapshots: 36 rows, 6 demoted
+- **Total: 99 rows replayed, 20 demotions, 0 status changes that were
+  not a ceiling hit.**
+
+Nine `(game, family, side, line)` keys demoted (7 logical refs; the
+repaired snapshot lines are separate keys):
+
+- ARI @ LA spread home 14.5 — edge +0.4707, ev +0.9321
+- BUF @ LV spread away 21.5 and -5.5 (repaired line, same model
+  inputs) — edge +0.4785, ev +0.9569
+- WAS @ SF spread home 17.5 and -7.5 (repaired line) — edge +0.4719,
+  ev +0.9345
+- WAS @ SF total under 51.5 — edge +0.2313, ev +0.4010
+- DAL @ GB total under 53.5 — edge +0.1749, ev +0.3570
+- BUF @ LV total under 54.5 — edge +0.1563, ev +0.3035
+- NYJ @ NE spread home -7.5 — edge +0.1757, ev +0.3699
+
+The audit's edge >= 0.25 set is 7 unique graded refs, all `PLAYABLE`.
+All 7 demote under the guard: 5 of them (MIN@CHI under, PHI@CHI ML
+home, GB@TB over, MIA@MIN spread, LAC@SEA spread) were checked
+directly against their own board artifacts in a second scratch pass;
+BUF@LV and WAS@SF were covered by the Oct 18-19 replay in both the
+original and repaired line form.
+
+### The "exactly the absurd set" check does not hold literally
+
+The step-3 criterion was "exactly the refs from the audit's edge >= 0.25
+set, and nothing else." With the approved 0.20/0.30 thresholds, the
+Oct 18-19 replay also demotes 4 refs below the audit's 0.25 line:
+
+- NYJ @ NE spread home -7.5 — ev +0.3699 (edge +0.1757)
+- DAL @ GB total under 53.5 — ev +0.3570 (edge +0.1749)
+- BUF @ LV total under 54.5 — ev +0.3035 (edge +0.1563)
+- WAS @ SF total under 51.5 — edge +0.2313, ev +0.4010
+
+The first three trip only the EV ceiling; WAS@SF under trips both the
+0.20 edge ceiling and the EV ceiling. No row that fails both ceilings
+changed status (`unexpected=0`). This is the approved thresholds doing
+what they say, not a wiring leak - but it means the guard removes more
+than the audit's absurd-edge group, and those four rows were graded
+PLAYABLE on live boards. Flagged rather than tuned; the constants are
+as decided.
+
+### Monitoring
+
+Per-board `[edge-ceiling]` lines are the dead-line metric; target is 0
+outside known manually repaired lines. A hit on a freshly built board
+with no repair is the signal that residual Polymarket spread resolution
+(audit candidate 2) is still live.
