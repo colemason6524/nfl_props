@@ -167,16 +167,20 @@ class TestDeadLineCeiling(unittest.TestCase):
             self.assertIn(token, line)
 
     def test_build_game_forecast_applies_guard(self):
-        # A zero/negative ceiling demotes every PLAYABLE ref; wiring check.
+        # A negative ceiling demotes every ref that was PLAYABLE; wiring check.
+        base = build_game_forecast(_game(), _fake_state(),
+                                   bovada_game=_bovada())
         with patch.object(fc_mod, "EDGE_CEILING", -1.0):
-            fc = build_game_forecast(_game(), _fake_state(),
-                                     bovada_game=_bovada())
-        priced = [r for r in fc.references if r.decimal is not None
-                  and r.ev is not None]
-        self.assertTrue(priced)
-        for ref in priced:
-            self.assertEqual(ref.status, NO_VALUE, ref)
-            self.assertTrue(ref.note and DEAD_LINE_SUSPECT in ref.note)
+            guarded = build_game_forecast(_game(), _fake_state(),
+                                          bovada_game=_bovada())
+        self.assertTrue(any(r.status == PLAYABLE for r in base.references))
+        for before, after in zip(base.references, guarded.references):
+            if before.status == PLAYABLE:
+                self.assertEqual(after.status, NO_VALUE, after)
+                self.assertTrue(after.note
+                                and DEAD_LINE_SUSPECT in after.note)
+            else:
+                self.assertEqual(after.status, before.status, after)
 
     def test_demoted_row_stays_in_board_artifact(self):
         from nfl_props import forecast_output

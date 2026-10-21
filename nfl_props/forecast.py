@@ -19,10 +19,11 @@ import numpy as np
 from .forecasting import game_features, project, qb_starter_is_out
 from .injury_debit import team_injury_debit
 from .ratings.epa import game_total_probs, shrink_prob, spread_probs
-from .references import (BOVADA, POLYMARKET, ForecastReference,
-                         build_reference)
+from .references import (BOVADA, POLYMARKET, ForecastReference, NO_VALUE,
+                         PLAYABLE, build_reference)
 from .rivalry import live_rivalry_features
 from .sources.weather import live_weather_for
+from .utils import log
 from .version import FORECAST_MODEL_VERSION
 
 
@@ -40,6 +41,40 @@ UNDER_MIN_GAP = float(os.environ.get("NFL_UNDER_MIN_GAP", "2.5"))
 # (symmetric scaling would overshoot it). Fitted state residuals are
 # untouched.
 TOTAL_RESID_SCALE = float(os.environ.get("NFL_TOTAL_RESID_SCALE", "1.15"))
+
+# Dead-line guard 2026-10-21 (post-fix audit candidate #1): an edge this
+# large is a broken/stale line, not a betting opinion (WAS@SF spread printed
+# p_model=0.9769, edge=+0.4719 as maximum-confidence PLAYABLE). Hits are
+# demoted PLAYABLE -> NO_VALUE but stay on the board artifact and in the
+# ledger, so the per-board hit count is the monitoring metric for dead lines.
+EDGE_CEILING = float(os.environ.get("NFL_EDGE_CEILING", "0.20"))
+EV_CEILING = float(os.environ.get("NFL_EV_CEILING", "0.30"))
+DEAD_LINE_SUSPECT = "DEAD_LINE_SUSPECT"
+
+
+def _fmt_signed(value) -> str:
+    return f"{value:+.4f}" if value is not None else "-"
+
+
+def apply_edge_ceiling(ref: ForecastReference, game: str) -> bool:
+    """Demote one PLAYABLE ref that trips the EV/edge ceiling.
+
+    Mutates status/note in place and logs game, family, side, line, p_model,
+    edge, ev. Returns True when the ref was demoted.
+    """
+    if ref.status != PLAYABLE:
+        return False
+    edge_hit = ref.edge is not None and abs(ref.edge) >= EDGE_CEILING
+    ev_hit = ref.ev is not None and abs(ref.ev) >= EV_CEILING
+    if not (edge_hit or ev_hit):
+        return False
+    ref.status = NO_VALUE
+    ref.note = (ref.note + " " if ref.note else "") + DEAD_LINE_SUSPECT
+    log(f"[edge-ceiling] {game} {ref.family} {ref.side} "
+        f"line={ref.line} p_model={ref.p_model} "
+        f"edge={_fmt_signed(ref.edge)} ev={_fmt_signed(ref.ev)} "
+        f"{DEAD_LINE_SUSPECT}")
+    return True
 
 
 def _clean(value) -> Optional[str]:
@@ -414,4 +449,9 @@ def build_game_forecast(game: dict, state: dict,
         fc.notes.append(note)
         print(f"[pipeline] injury debit {fc.forecast_id} {note} "
               f"{attribution}", file=sys.stderr, flush=True)
+
+    # Dead-line ceiling: demote absurd-market refs, keep the row visible.
+    game_label = f"{away} @ {home}"
+    for ref in fc.references:
+        apply_edge_ceiling(ref, game_label)
     return fc
