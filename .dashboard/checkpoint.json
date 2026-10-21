@@ -1,24 +1,28 @@
 {
   "schema_version": 1,
   "project_id": "nfl_props",
-  "updated_at": "2026-10-20T04:34:37+00:00",
+  "updated_at": "2026-10-21T16:19:20+00:00",
   "status": "observing",
-  "summary": "Three fixes shipped 2026-10-19 evening: (1) Polymarket spread bug (4dbe8d7): dead-rung ladder rows were picked as main spread (SF showed +17.5 vs real -7.5); parser now prefers canonical line, skips non-live rungs; _line_matches requires sign+distance agreement with Bovada. 2026-10-19 WAS@SF snapshot corrected 17.5 -> -7.5 so it grades right. BUF@LV 2026-10-18 snapshot has same signature, flagged uncorrected. (2) Starter-aware injury fix (71ac45f): QB3 Rourke OUT no longer debits SF or displaces Purdy; SF debit -2.7 -> -0.2. (3) Wrapper delta_check task added (d3895d5) so TNF/SNF/MNF checks run through the wrapper with env loaded.",
+  "summary": "Read-only post-fix audit (docs/AUDIT_2026-10-21_POST_FIX.md), board-print attribution over 263 graded refs, weeks 1-6. Season 138-124-1, -14.86u, -5.7% ROI. Bleed is PLAYABLE totals: -12.66u (-17.3%, n=73) while NO_VALUE totals went +1.50u (+10.7%, n=14); spreads +1.95u, ML -5.66u, ML PLAYABLE +0.20u (no action). Post-fix cohort (>=2026-10-18T18:47Z) n=14: 10-4, +3.69u, totals 3-1 +1.89u - direction right, statistically nothing (diff 0.63u +/- 0.44 se). Totals edge bands are non-monotone (3-6%: -5.40u, n=13), so tightening the totals edge floor is not the first move. Top candidate: forecast path has no EV/edge ceiling - 7 refs at edge >=0.25 all PLAYABLE (p_model 0.98, ev 0.93) and netted +1.55u of dead-line luck; tiers.py EV_MAX=0.08 guards only the retired path. Also: UNDER_GAP_BELOW_FLOOR fired 3x ever (all Oct 18), zero graded suppressions; BUF@LV and WAS@SF line repairs were manual snapshot rewrites after the grade artifact, with no note on WAS and nothing in the ledger. Ops: no week-7 board yet, on-VM timers still disabled, personnel.json last pulled 2026-10-20T00:48Z. Grading note: the printed 17.5 WAS@SF line scores +0.98u but the true -7.5 line is a -1.00u loss (SF won by 6) - any script rebuilding snapshot paths from kickoff_utc[:10] misses 00:15Z Monday repairs.",
   "experiment": null,
   "watching_for": null,
-  "next_action": null,
+  "next_action": "Refresh personnel/injury feed (last pull 2026-10-20T00:48Z) before the week-7 board; next review scores 40 post-fix totals (>= -8u cumulative = bleed persists).",
   "deployed": false,
-  "git_commit": "",
+  "git_commit": "5538d39",
   "check_back": {
     "kind": "grade_event",
-    "label": "nfl-spread-starter-delta-fixes",
+    "label": "post-fix totals bleed (2026-10-18 selection fixes)",
     "target": null,
-    "baseline": "2026-10-20T04:34:37+00:00",
+    "baseline": "2026-10-21T16:19:20+00:00",
     "events": [],
     "target_date": null,
     "monitoring": false
   },
   "docs": [
+    {
+      "label": "Post-fix audit 2026-10-21",
+      "path": "docs/AUDIT_2026-10-21_POST_FIX.md"
+    },
     {
       "label": "Next check-in",
       "path": "docs/NEXT_CHECKIN.md"
