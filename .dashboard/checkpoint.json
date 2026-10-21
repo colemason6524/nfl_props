@@ -1,28 +1,24 @@
 {
   "schema_version": 1,
   "project_id": "nfl_props",
-  "updated_at": "2026-10-21T16:19:20+00:00",
+  "updated_at": "2026-10-21T18:05:52+00:00",
   "status": "observing",
-  "summary": "Read-only post-fix audit (docs/AUDIT_2026-10-21_POST_FIX.md), board-print attribution over 263 graded refs, weeks 1-6. Season 138-124-1, -14.86u, -5.7% ROI. Bleed is PLAYABLE totals: -12.66u (-17.3%, n=73) while NO_VALUE totals went +1.50u (+10.7%, n=14); spreads +1.95u, ML -5.66u, ML PLAYABLE +0.20u (no action). Post-fix cohort (>=2026-10-18T18:47Z) n=14: 10-4, +3.69u, totals 3-1 +1.89u - direction right, statistically nothing (diff 0.63u +/- 0.44 se). Totals edge bands are non-monotone (3-6%: -5.40u, n=13), so tightening the totals edge floor is not the first move. Top candidate: forecast path has no EV/edge ceiling - 7 refs at edge >=0.25 all PLAYABLE (p_model 0.98, ev 0.93) and netted +1.55u of dead-line luck; tiers.py EV_MAX=0.08 guards only the retired path. Also: UNDER_GAP_BELOW_FLOOR fired 3x ever (all Oct 18), zero graded suppressions; BUF@LV and WAS@SF line repairs were manual snapshot rewrites after the grade artifact, with no note on WAS and nothing in the ledger. Ops: no week-7 board yet, on-VM timers still disabled, personnel.json last pulled 2026-10-20T00:48Z. Grading note: the printed 17.5 WAS@SF line scores +0.98u but the true -7.5 line is a -1.00u loss (SF won by 6) - any script rebuilding snapshot paths from kickoff_utc[:10] misses 00:15Z Monday repairs.",
+  "summary": "Shipped EV/edge ceiling (0.20/0.30): PLAYABLE dead-line refs demote to NO_VALUE/DEAD_LINE_SUSPECT, stay on board+ledger. Tests 224 OK. Dry run Oct18-19: 20/99 rows demoted, all 7 audit absurd refs + 4 sub-0.25 EV hits. Commits 32a9a33, 2b51cbd, ce05473.",
   "experiment": null,
   "watching_for": null,
-  "next_action": "Refresh personnel/injury feed (last pull 2026-10-20T00:48Z) before the week-7 board; next review scores 40 post-fix totals (>= -8u cumulative = bleed persists).",
+  "next_action": "Refresh personnel/injury feed before the week-7 board; next review scores 40 post-fix totals (>= -8u cumulative = bleed persists).",
   "deployed": false,
-  "git_commit": "5538d39",
+  "git_commit": "2b51cbd",
   "check_back": {
-    "kind": "grade_event",
-    "label": "post-fix totals bleed (2026-10-18 selection fixes)",
-    "target": null,
-    "baseline": "2026-10-21T16:19:20+00:00",
+    "kind": "calendar",
+    "label": "after a week of games",
+    "target": 7,
+    "baseline": "2026-10-21T18:05:52+00:00",
     "events": [],
     "target_date": null,
     "monitoring": false
   },
   "docs": [
-    {
-      "label": "Post-fix audit 2026-10-21",
-      "path": "docs/AUDIT_2026-10-21_POST_FIX.md"
-    },
     {
       "label": "Next check-in",
       "path": "docs/NEXT_CHECKIN.md"
