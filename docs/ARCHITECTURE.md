@@ -1,5 +1,74 @@
 # Module map
 
+## Live system (forecast-first) — the production product
+
+The board publishes a price-free forecast for every scheduled game first, then
+attaches Bovada/Polymarket references to label value (`PLAYABLE` / `NO_VALUE` /
+`UNPRICED`). Product rules: [`PRODUCT_CONTRACT.md`](PRODUCT_CONTRACT.md).
+
+```
+nfl_props/
+  config.py              paths (incl. FORECAST_HISTORY_DIR, SNAPSHOTS_DIR,
+                         LEDGER_DIR, FORECAST_BACKTESTS_DIR), seasons, URLs
+  teams.py               canonical abbrs + alias normalization (never force-match)
+  pricing.py             American/decimal, proportional devig, EV with pushes
+  version.py             history schema / model / grading / policy versions
+  cli.py                 refresh-data | build | rebuild-state | rebuild-state-v2
+                         | rebuild-forecast-state | backfill-weather
+  sources/
+    nflverse.py          pbp parquet + games.csv ingest -> canonical store
+                         (team_games + games + team_situational_games +
+                          qb_games), merge-coverage diagnostics
+    bovada.py            live lines (spread/ML/total + team totals), validated
+                         fail-open cache, per-event fetch
+    polymarket.py        fallback prices when Bovada has no event
+    weather.py           Open-Meteo game-day weather store (total head input)
+    personnel.py         injury/personnel feed store (fail-open scaffold)
+    personnel_feed.py    ESPN personnel pull -> personnel.json
+    depth.py             depth-chart pull -> starter/backup attribution
+  forecasting.py         point-in-time feature build + three price-free heads
+                         (winner logistic, margin OLS, total OLS) ->
+                         data/processed/forecast_state.json
+  forecast.py            one game -> GameForecast (heads + internal
+                         disagreement + pick per family)
+  references.py          market reference attachment: consensus price, edge,
+                         EV, PLAYABLE / NO_VALUE / UNPRICED labelling
+  forecast_board.py      schedule -> one GameForecast per game; Discord
+                         three-section render
+  forecast_output.py     export_history() (outputs/forecast_history/),
+                         latest_history(), append_ledger()
+  snapshots.py           per-game pregame snapshots (outputs/snapshots/),
+                         latest_snapshot_before(), cleanup_snapshots()
+  delta.py               pre-kickoff injury delta check + tiered alerts
+  injury_debit.py        injury/positional debits applied to the model input
+  schedule.py            schedule/kickoff resolution, ET day-of-board rule
+  rivalry.py             division/rivalry context features
+  notifiers/
+    forecast_discord.py  board + recap webhook delivery, chunking, gating
+    discord.py           ops alerts (send_ops_alert)
+
+run_forecast_board.py    live board entry point (--wave, --date, --discord)
+grade_forecast.py        official performance record: season report
+                         (grade_all/render_report) + weekly public recap
+                         (grade_week/render_weekly_recap, --weekly)
+backtest_forecast.py     leak-free tune/holdout validation of the forecast heads
+
+outputs/forecast_history/  nfl_forecast_*.json — THE record (every board run)
+outputs/snapshots/         <game-date>/<forecast_id>.json — last bettable
+                           pregame pick state; grading prefers these
+outputs/forecast_backtests/ grade_forecast_*.{txt,json} (season) and
+                           grade_weekly_<season>w<NN>_*.{txt,json} (weekly)
+outputs/ledger/            forecast_ledger.jsonl — write-only print log, NOT
+                           a performance source (no reader)
+outputs/diagnostics/       bovada coverage + build diagnostics
+```
+
+## Legacy lane (v1 / v2 shadow) — retired operationally
+
+Kept for historical cohort grading only; nothing scheduled runs it, and
+`outputs/history/` has been frozen since 2026-09-12. Its artifacts are never
+pooled with the forecast cohort.
+
 ```
 nfl_props/
   config.py              paths, seasons (tune/holdout/current), nflverse URLs
@@ -37,11 +106,11 @@ data/raw/                nflverse downloads (gitignored)
 data/processed/          team_games.parquet, games.parquet,
                          team_situational_games.parquet, qb_games.parquet,
                          live_state.json, live_state_v2_shadow.json
-outputs/history/         nfl_board_*.json (every run, full snapshot)
-outputs/backtests/       backtest_*.txt, backtest_v2_*.txt, grade_*.txt
+outputs/history/         nfl_board_*.json (legacy v1 board, frozen 2026-09-12)
+outputs/backtests/       backtest_*.txt, backtest_v2_*.txt, grade_*.txt (legacy)
 outputs/diagnostics/     build + bovada coverage diagnostics
-scripts/                 Windows Task Scheduler wrappers
-tests/                   unittest: bovada cache/parse/filter + v2 replay/leakage
+scripts/                 Linux task wrappers (run_nfl_linux_task.sh)
+tests/                   unittest suite, run with `.venv/bin/python -m pytest -q`
 ```
 
 ## Layer separation (do not mix)
@@ -53,8 +122,9 @@ tests/                   unittest: bovada cache/parse/filter + v2 replay/leakage
 | Value layer | `pricing.py` + `board.py` | model changes |
 | Tiers | `tiers.py` | sorting/presentation |
 | Presentation | `output.py`, `notifiers/` | thresholds |
-| History | `output.py::export_history` | — |
-| Grading | `grade.py` | auto-retraining |
+| History (record) | `forecast_output.py::export_history` | derived views |
+| Grading | `grade_forecast.py` | auto-retraining |
+| Legacy v1/v2 lane | `board.py` + `output.py` history | forecast cohort numbers |
 
 ## Key conventions
 
@@ -81,9 +151,9 @@ tests/                   unittest: bovada cache/parse/filter + v2 replay/leakage
 `ratings/v2.py` is a research-only parallel path. It never writes
 `live_state.json`, never changes `p_model`, tiers, or `MODEL_VERSION`, and its
 output (`live_state_v2_shadow.json`, history `v2_shadow`, `backtest_v2.py`)
-is for prospective grading. `grade.py` compares v1/v2 points, margin, and total
-MAE on every resolved regular-season game; it does not assign v2 bets or ROI.
-Its base off/def/pace ratings are numerically
+is for prospective grading. The legacy `grade.py` compares v1/v2 points,
+margin, and total MAE on every resolved regular-season game; it does not assign
+v2 bets or ROI. Its base off/def/pace ratings are numerically
 identical to v1 (asserted by `tests/test_v2.py::BaseParityTests`).
 
 Data definitions for the added metrics:

@@ -1,5 +1,9 @@
 # NFL Props — Next Check-In
 
+> **Superseded 2026-10-22.** This note describes the 2026-09-30 check-in and is
+> kept as history. Live state and schedules: [`OPERATIONS.md`](OPERATIONS.md).
+> Current record/ledger status: [`INTEGRITY_AUDIT_2026-10-22.md`](INTEGRITY_AUDIT_2026-10-22.md).
+
 ## Current check-in — 2026-09-30
 
 - Week 4 grade-diagnostics commit `385f82d` has been pulled to the existing

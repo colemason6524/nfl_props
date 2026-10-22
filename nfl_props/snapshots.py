@@ -9,7 +9,11 @@ fallback when no snapshot exists.
 Snapshot storage: ``outputs/snapshots/{YYYY-MM-DD}/{forecast_id}.json``.
 Snapshots are keyed by the stable ``forecast_id`` (``g:<id>`` when the
 schedule provides one, else ``m:<away>@<home>:<day>``) and overwritten by
-newer writes. Retained 30 days, then cleaned up.
+newer writes. NOT pruned automatically: `cleanup_snapshots()` exists and is
+tested, but no scheduled task calls it, and deleting old snapshots would change
+past grading (graded references fall back to the board artifact). Retention is
+currently manual, by design — pending a decision (see
+`docs/INTEGRITY_AUDIT_2026-10-22.md`).
 
 Snapshot format (one pick entry per priced family):
     {

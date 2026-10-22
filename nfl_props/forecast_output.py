@@ -129,6 +129,14 @@ def latest_history(path: Optional[Path] = None) -> Optional[List[dict]]:
 
 
 def append_ledger(forecasts: List[GameForecast], summary: dict) -> Path:
+    """Append a print log of the forecasts this run exported.
+
+    `outputs/ledger/forecast_ledger.jsonl` is a write-only audit trail of what
+    each board/pregame-refresh run printed. It is NOT the performance record and
+    nothing reads it: the record is `outputs/forecast_history/` as graded by
+    `grade_forecast.py`, and every ledger row duplicates the history payload from
+    that same run. Treat it as a cold log, never as an independent source.
+    """
     from .config import LEDGER_DIR
     LEDGER_DIR.mkdir(parents=True, exist_ok=True)
     path = LEDGER_DIR / "forecast_ledger.jsonl"

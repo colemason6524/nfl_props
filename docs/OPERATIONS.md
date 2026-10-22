@@ -2,13 +2,16 @@
 
 ## Weekly rhythm (in season) — forecast-first
 
-| When (America/New_York) | What | Runs on |
+| When (America/New_York) | What | Timer |
 |---|---|---|
-| Thu 17:00 | Forecast Thursday games | `sports-nfl-board` fleet timer |
-| Sun 11:00 | Forecast Sunday early slate | `sports-nfl-board` fleet timer |
-| Sun 16:00 | Forecast remaining Sunday evening slate | `sports-nfl-board` fleet timer |
-| Mon 18:00 | Forecast Monday game | `sports-nfl-board` fleet timer |
-| Tue 09:00 | Grade forecasts, refresh data, rebuild v1+v2+forecast state | `sports-nfl-grade` fleet timer |
+| Thu 19:15 | Forecast Thursday game | `sports-nfl-board.timer` |
+| Sun 11:00 | Forecast Sunday early slate | `sports-nfl-board.timer` |
+| Sun 14:47 | Wave board: full refresh for the remaining slate | `sports-nfl-wave2.timer` |
+| Sun 15:37 | Forecast remaining Sunday evening slate | `sports-nfl-board.timer` |
+| Mon 18:00 | Forecast Monday game | `sports-nfl-board.timer` |
+| Mon 19:15 | Late pregame injury pull + board regen (`Persistent=true`) | `sports-nfl-mnf-refresh.timer` → `sports-nfl-pregame-refresh.service` |
+| Tue 03:30 | Public weekly recap (refresh finals → `grade_forecast.py --weekly --discord`) | `sports-nfl-weekly-grade.timer` |
+| Tue 08:47 | Grade forecasts, refresh data, rebuild v1+v2+forecast state | `sports-nfl-grade.timer` |
 
 Each run publishes only the current ET day's not-yet-started games, in three
 Discord sections (Moneylines / Spreads / Totals), with no truncation. On the VM
@@ -22,8 +25,22 @@ that is coverage, not failure.
 The legacy price-screened board (`run_board.py`, `grade.py`) is retired
 operationally and kept only for historical cohort grading. Weekly forecast
 JSON grading diagnostics (grading version `nfl-forecast-grading-v2`) are
-specified in [`WEEK4_GRADE_DIAGNOSTICS.md`](WEEK4_GRADE_DIAGNOSTICS.md); the
-public weekly recap remains unchanged.
+specified in [`WEEK4_GRADE_DIAGNOSTICS.md`](WEEK4_GRADE_DIAGNOSTICS.md).
+
+Performance-record scope (since 2026-10-22): the advertised record — weekly
+recap **and** the season report — counts `PLAYABLE` references only. `NO_VALUE`
+references are graded and reported on their own line; the all-references
+figure survives only as a `pooled` diagnostic. Grading prices every reference
+at the latest pre-kickoff snapshot when one exists, falling back to the board
+artifact.
+
+Scheduling gaps (documented, not silently fixed):
+`sports-nfl-pregame-refresh.timer` (Sun 09:30) is **disabled** and has never
+fired, so the only late pregame refresh in production is the Monday 19:15 one;
+and `scripts/run_nfl_linux_task.sh delta_check` has **no timer at all**, so
+`nfl_props/delta.py` never runs unattended (no snapshot has ever carried
+`source: delta`). Both need a decision, not a guess — see
+[`INTEGRITY_AUDIT_2026-10-22.md`](INTEGRITY_AUDIT_2026-10-22.md).
 
 ## Linux production (Azure VM) — current
 
@@ -31,9 +48,12 @@ Deploy/verify steps: [`DEPLOY_LINUX.md`](DEPLOY_LINUX.md). Summary:
 
 - Repo `~/nfl_props` on `azureuser@130.131.0.6`; venv; one-time data
   bootstrap (`refresh-data` → `build` → `rebuild-state[-v2]`).
-- User-level `sports-*` fleet timers (production since 2026-09-09):
-  `sports-nfl-board` (daily 10:56 ET), `sports-nfl-grade` (Tue 08:47 ET),
-  `Persistent=false`. Disabled system-level `nfl-props-*` timers remain in
+- User-level `sports-*` fleet timers (production since 2026-09-09), all
+  `Persistent=false` except `sports-nfl-mnf-refresh` (true): board (Thu 19:15,
+  Sun 11:00, Sun 15:37, Mon 18:00 ET), wave2 (Sun 14:47 Detroit), pregame
+  refresh (Mon 19:15 ET via mnf-refresh), weekly recap (Tue 03:30 ET), grade
+  (Tue 08:47 Detroit). `sports-nfl-pregame-refresh.timer` exists but is
+  disabled. Disabled system-level `nfl-props-*` timers remain in
   `scripts/systemd/` as a documented fallback.
 - Env/config in `~/.config/nfl_props/env`; logs in
   `logs/nfl_forecast.log` / `logs/nfl_grade.log` plus `journalctl`.
@@ -64,8 +84,8 @@ retirement. History/logs were migrated to the Mac before shutdown.
   real market descriptions.
 - Terminal output caps Watch rows at 30 for readability; every candidate is
   still exported to history. `run_forecast_board.py --all-watch` prints all Watch rows.
-- Tests: `.venv\Scripts\python -m unittest discover -s tests` (Mac:
-  `.venv/bin/python -m unittest discover -s tests`).
+- Tests: `.venv/bin/python -m pytest -q` (the suite is unittest-style and also
+  runs under `python -m unittest discover -s tests`).
 
 ## Mac dev equivalents
 
@@ -111,6 +131,7 @@ ignore the warnings.
 | Grade "unmatched games" | team alias missing in `teams.py`, or kickoff/date drift beyond ±1 day |
 | pbp 404 for current season | normal before the season's first game is published |
 | Grade "pending" rows | normal until nflverse posts final scores (usually same night / next morning) |
+| Season/weekly record looks wrong | `grade_forecast.py` (season) or `grade_forecast.py --weekly --week N --no-discord --no-export` (recompute from source, writes nothing) |
 
 ## Rules of engagement
 

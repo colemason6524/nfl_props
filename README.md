@@ -22,8 +22,10 @@ The authoritative product rules live in [`docs/PRODUCT_CONTRACT.md`](docs/PRODUC
 - Creates a weekly NFL-universe forecast even when a game is unpriced; internal
   disagreement between the three heads is shown, not hidden.
 - Grades forecast accuracy (winner accuracy, Brier, log loss, margin/total MAE)
-  separately from flat-1u reference ROI at captured prices; weekly JSON reports
-  also include residual, market-reversal, confidence, and edge-band diagnostics.
+  separately from flat-1u reference ROI at captured prices; the advertised
+  weekly/season record counts `PLAYABLE` references only and reports `NO_VALUE`
+  on its own line. Weekly JSON reports also include residual, market-reversal,
+  confidence, and edge-band diagnostics.
 - Continues into the postseason.
 
 ## Status (2026-09-30)
