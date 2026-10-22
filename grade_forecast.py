@@ -16,6 +16,12 @@ artifact.
 
 Forecast accuracy and reference value are never pooled. NFL ties settle the
 moneyline reference as a push (stake returned), never a loss.
+
+The season record is scoped to PLAYABLE references, exactly like the weekly
+recap: NO_VALUE references (EV below the playable threshold, or demoted by
+the dead-line ceiling) are graded and reported separately, and the old
+all-references figures survive only as an explicitly labelled `pooled`
+diagnostic.
 """
 from __future__ import annotations
 
@@ -264,6 +270,7 @@ def grade_all(since: str = "") -> dict:
             "total_mae": (round(float(np.mean(total_err)), 3)
                           if total_err else None),
         },
+        "headline": _season_headline(ref_rows),
         "references": _ref_report(),
     }
 
@@ -284,7 +291,25 @@ def render_report(stats: dict) -> str:
         f"  margin MAE={stats['projection']['margin_mae']} "
         f"total MAE={stats['projection']['total_mae']}",
         "",
-        "Reference ROI (flat 1u at captured price; descriptive only):",
+        "Season record (PLAYABLE references only; flat 1u at captured price):",
+    ]
+    headline = stats["headline"]
+    for label, key in (("PLAYABLE", "playable"), ("NO_VALUE", "no_value"),
+                       ("pooled", "pooled")):
+        bundle = headline[key]
+        rec = bundle["record"]
+        roi = bundle["roi"] if bundle["roi"] is not None else 0.0
+        lines.append(
+            f"  {label:<9} "
+            f"{_record_text(rec['wins'], rec['losses'], rec['pushes'])}"
+            f"  units={bundle['units']:+.2f} roi={roi:+.1%}"
+            f"  ({bundle['plays']} graded refs)")
+    lines += [
+        "  (pooled = PLAYABLE + NO_VALUE, diagnostic only: NO_VALUE refs "
+        "were never advertised picks)",
+        "",
+        "Reference breakdowns (pooled over all priced refs: PLAYABLE + "
+        "NO_VALUE):",
     ]
     for key, groups in stats["references"].items():
         lines.append(f"  by {key}:")
@@ -350,6 +375,41 @@ def _record_text(wins: int, losses: int, pushes: int) -> str:
     if pushes:
         text += f"-{pushes}"
     return text
+
+
+def _ref_bundle(rows: List[dict]) -> dict:
+    """Record + flat-1u totals for one set of graded reference rows."""
+    rec = _wl_rows(rows)
+    decided = rec["wins"] + rec["losses"]
+    units_total = round(sum(r["units"] for r in rows), 2)
+    return {
+        "record": {**rec,
+                   "pct": (round(rec["wins"] / decided, 4) if decided
+                           else None)},
+        "units": units_total,
+        "plays": len(rows),
+        "roi": round(units_total / len(rows), 4) if rows else None,
+    }
+
+
+def _season_headline(ref_rows: List[dict]) -> dict:
+    """Season record split by advertisement status.
+
+    `playable` is the board's record: a NO_VALUE reference was never a
+    playable pick, so pooling it into the season record/ROI misstates what
+    the board put forward. `no_value` carries the same shape for everything
+    priced but not PLAYABLE, and `pooled` keeps the old all-references
+    accounting, so playable n + no_value n still equals the old graded n.
+    """
+    from nfl_props.references import PLAYABLE
+    playable = [r for r in ref_rows if r["status"] == PLAYABLE]
+    rest = [r for r in ref_rows if r["status"] != PLAYABLE]
+    return {
+        "scope": "PLAYABLE references only",
+        "playable": _ref_bundle(playable),
+        "no_value": _ref_bundle(rest),
+        "pooled": _ref_bundle(ref_rows),
+    }
 
 
 def grade_week(season: Optional[int] = None, week: Optional[int] = None,
