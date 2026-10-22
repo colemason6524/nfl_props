@@ -362,6 +362,8 @@ def grade_week(season: Optional[int] = None, week: Optional[int] = None,
     cumulative grader), keeps only games from the target (season, week),
     and grades moneyline / spread / total references at captured prices.
     """
+    from nfl_props.forecast import DEAD_LINE_SUSPECT
+    from nfl_props.references import PLAYABLE
     from nfl_props.sources.nflverse import load_raw_games
     now = now or datetime.now(timezone.utc)
     if games is None:
@@ -381,6 +383,7 @@ def grade_week(season: Optional[int] = None, week: Optional[int] = None,
     ref_rows: List[dict] = []
     game_rows: List[str] = []
     pending: List[str] = []
+    ceiling_hits = 0
     winner_n = winner_correct = 0
     brier_terms: List[float] = []
     logloss_terms: List[float] = []
@@ -401,6 +404,14 @@ def grade_week(season: Optional[int] = None, week: Optional[int] = None,
                 or int(final["week"]) != week:
             continue
         matchup = f"{fc['away']} @ {fc['home']}"
+        # Dead-line ceiling hits are counted here, before any gradeability
+        # or scoreboard skip: a demoted reference counts whether or not the
+        # game has a final score and whether or not a price was captured.
+        # The signal is the demotion itself -- nfl_props.forecast
+        # .apply_edge_ceiling stamps DEAD_LINE_SUSPECT on the ref note.
+        for ref in fc.get("references", []):
+            if DEAD_LINE_SUSPECT in str(ref.get("note") or ""):
+                ceiling_hits += 1
         if pd.isna(final["home_score"]) or pd.isna(final["away_score"]):
             pending.append(matchup)
             continue
@@ -479,19 +490,49 @@ def grade_week(season: Optional[int] = None, week: Optional[int] = None,
             ref_rows.append({
                 "family": ref.get("family"), "source": ref.get("source"),
                 "status": ref.get("status"),
+                "note": ref.get("note"),
                 "edge_band": _edge_band(ref.get("edge")),
                 "result": result,
                 "units": units(result, float(ref["decimal"])),
             })
 
-    record = _wl_rows(ref_rows)
-    decided = record["wins"] + record["losses"]
-    families = {fam: _wl_rows([r for r in ref_rows if r["family"] == fam])
-                for fam, _ in WEEKLY_FAMILIES}
+    # Only PLAYABLE references are the board's advertised record: a
+    # NO_VALUE ref (EV below the playable threshold, or demoted by the
+    # dead-line EV/edge ceiling) was never a playable pick, so pooling it
+    # into the headline record/ROI misstates what the board put forward.
+    # Everything priced but not PLAYABLE is reported separately under
+    # `no_value`, so playable n + no_value n still equals the old pooled
+    # graded n.
+    playable_rows = [r for r in ref_rows if r["status"] == PLAYABLE]
+    no_value_rows = [r for r in ref_rows if r["status"] != PLAYABLE]
+
+    def split_bundle(rows: List[dict]) -> dict:
+        rec = _wl_rows(rows)
+        decided = rec["wins"] + rec["losses"]
+        units_total = round(sum(r["units"] for r in rows), 2)
+        return {
+            "record": {**rec, "pct": (round(rec["wins"] / decided, 4)
+                                     if decided else None)},
+            "families": {fam: _wl_rows([r for r in rows
+                                        if r["family"] == fam])
+                         for fam, _ in WEEKLY_FAMILIES},
+            "priced": {
+                "units": units_total,
+                "plays": len(rows),
+                "roi": (round(units_total / len(rows), 4) if rows
+                        else None),
+            },
+        }
+
+    playable_bundle = split_bundle(playable_rows)
+    no_value_bundle = split_bundle(no_value_rows)
+    record = playable_bundle["record"]
+    families = playable_bundle["families"]
+    # Source and edge-band breakdowns stay pooled over every graded ref, so
+    # the artifact keeps the accounting it has always carried.
     sources: Dict[str, List[dict]] = {}
     for row in ref_rows:
         sources.setdefault(str(row["source"]), []).append(row)
-    unit_total = round(sum(r["units"] for r in ref_rows), 2)
 
     def error_summary(values: List[float]) -> dict:
         return {"n": len(values), "mae": round(float(np.mean(np.abs(values))), 3) if values else None,
@@ -565,15 +606,14 @@ def grade_week(season: Optional[int] = None, week: Optional[int] = None,
         },
         "confidence_groups": confidence_report,
         "edge_bands": grouped_outcomes("edge_band"),
-        "record": {**record, "pct": (round(record["wins"] / decided, 4)
-                                     if decided else None)},
+        # `record` / `families` / `priced` keep their names (backward
+        # compatible) but now cover PLAYABLE references only; the NO_VALUE
+        # split and the dead-line ceiling-hit count sit alongside them.
+        "record": record,
         "families": families,
-        "priced": {
-            "units": unit_total,
-            "plays": len(ref_rows),
-            "roi": (round(unit_total / len(ref_rows), 4)
-                    if ref_rows else None),
-        },
+        "priced": playable_bundle["priced"],
+        "no_value": no_value_bundle,
+        "ceiling_hits": ceiling_hits,
         "sources": {
             name: {
                 **_wl_rows(rows),
@@ -587,7 +627,14 @@ def grade_week(season: Optional[int] = None, week: Optional[int] = None,
 
 
 def render_weekly_recap(stats: dict) -> str:
-    """Public weekly recap: week record, family records, priced ROI."""
+    """Public weekly recap: playable record, NO_VALUE split, priced ROI.
+
+    The headline `Week record` (and the family lines) cover PLAYABLE
+    references only -- those are the picks the board actually put forward.
+    NO_VALUE references are graded and reported on their own line so the
+    two never pool, and dead-line ceiling demotions are counted separately
+    because they are a data-quality signal, not a result.
+    """
     rec = stats["record"]
     pct = " (n/a)" if rec["pct"] is None else f" ({rec['pct']:.1%})"
     lines = [
@@ -600,6 +647,20 @@ def render_weekly_recap(stats: dict) -> str:
         if g["n"]:
             lines.append(f"  {fam_label}: "
                          f"{_record_text(g['wins'], g['losses'], g['pushes'])}")
+    lines.append("")
+    no_value = stats.get("no_value") or {}
+    nv_rec = no_value.get("record") or {}
+    nv_plays = (no_value.get("priced") or {}).get("plays", 0)
+    if nv_plays:
+        nv_text = _record_text(nv_rec.get("wins", 0),
+                               nv_rec.get("losses", 0),
+                               nv_rec.get("pushes", 0))
+        lines.append(f"NO_VALUE: {nv_text} ({nv_plays} graded refs, "
+                     "excluded from the record)")
+    else:
+        lines.append("NO_VALUE: none graded")
+    lines.append("Dead-line ceiling hits: "
+                 f"{int(stats.get('ceiling_hits') or 0)}")
     priced = stats["priced"]
     if priced["plays"]:
         lines += ["", f"Priced ROI: {priced['units']:+.2f}u across "

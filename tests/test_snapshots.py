@@ -135,6 +135,30 @@ class SnapshotIOTest(unittest.TestCase):
         self.assertEqual(data["picks"][0]["family"], "moneyline")
         self.assertEqual(data["model"]["p_home_win"], 0.44)
 
+    def test_ref_pick_preserves_note(self):
+        # The weekly recap counts DEAD_LINE_SUSPECT demotions from the ref
+        # note, so a snapshot must not drop it when grading prefers the
+        # snapshot over the board artifact.
+        pick = S._ref_pick({"family": "spread", "side": "home",
+                            "line": -3.0, "decimal": 1.909,
+                            "status": "NO_VALUE",
+                            "note": "DEAD_LINE_SUSPECT"})
+        self.assertEqual(pick["note"], "DEAD_LINE_SUSPECT")
+
+    def test_note_survives_snapshot_roundtrip(self):
+        from nfl_props.forecast import DEAD_LINE_SUSPECT
+        data = S.snapshot_from_forecast({
+            "forecast_id": "g:9", "away": "KC", "home": "BUF",
+            "kickoff_utc": KICKOFF.isoformat(), "available": True,
+            "references": [{"family": "spread", "side": "home",
+                            "line": -3.0, "decimal": 1.909,
+                            "status": "NO_VALUE", "source": "bovada",
+                            "note": DEAD_LINE_SUSPECT}],
+        })
+        S.write_snapshot("g:9", data, "wave", now=T1)
+        latest = S.latest_snapshot_before("g:9", KICKOFF)
+        self.assertIn(DEAD_LINE_SUSPECT, latest["picks"][0]["note"])
+
     def test_write_board_snapshots_skips_unavailable(self):
         fcs = [
             {"forecast_id": "g:1", "available": True, "away": "A",

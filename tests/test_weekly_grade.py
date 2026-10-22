@@ -1,4 +1,10 @@
-"""Weekly public grade: week targeting, record/ROI format, delivery."""
+"""Weekly public grade: week targeting, record/ROI format, delivery.
+
+The recap splits PLAYABLE from NO_VALUE: `record`/`families`/`priced` cover
+PLAYABLE references only, `no_value` carries the same bundle shape for the
+demoted/unplayable ones, and `ceiling_hits` counts dead-line ceiling
+demotions whether or not the game/reference was graded.
+"""
 from __future__ import annotations
 
 import json
@@ -18,10 +24,11 @@ from nfl_props.version import FORECAST_MODEL_VERSION
 NOW = datetime(2026, 9, 15, 7, 30, tzinfo=timezone.utc)  # Tue 03:30 ET
 
 
-def _ref(family, side, line, decimal, source="bovada", p_market=None):
+def _ref(family, side, line, decimal, source="bovada", p_market=None,
+         status="PLAYABLE", note=None):
     return {"family": family, "side": side, "line": line,
-            "decimal": decimal, "source": source, "status": "PLAYABLE",
-            "p_market": p_market}
+            "decimal": decimal, "source": source, "status": status,
+            "p_market": p_market, "note": note}
 
 
 def _fc(fid, away, home, kickoff, p_home, margin, total, refs):
@@ -159,8 +166,18 @@ class TestWeeklyGrading(unittest.TestCase):
         self.assertIn("  Moneylines: 2-1", text)
         self.assertIn("  Spreads: 2-0-1", text)
         self.assertIn("  Totals: 2-0-1", text)
+        self.assertIn("NO_VALUE: none graded", text)
+        self.assertIn("Dead-line ceiling hits: 0", text)
         self.assertIn("Priced ROI: +4.54u across 9 plays (+50.4%)", text)
         self.assertIn("Pending: 1 games", text)
+
+    def test_every_fixture_ref_is_playable_so_no_value_is_empty(self):
+        stats = self._stats()
+        self.assertEqual(stats["no_value"]["priced"]["plays"], 0)
+        self.assertEqual(stats["no_value"]["record"]["n"], 0)
+        self.assertEqual(stats["no_value"]["record"]["wins"], 0)
+        self.assertEqual(stats["no_value"]["record"]["losses"], 0)
+        self.assertEqual(stats["ceiling_hits"], 0)
 
     def test_forecast_accuracy_kept_in_artifact(self):
         stats = self._stats()
@@ -205,6 +222,127 @@ class TestWeeklyGrading(unittest.TestCase):
             stats = grade_week(games=games, paths=paths + [tie_path], now=NOW)
         self.assertEqual(stats["winner"]["n"], 3)
         self.assertAlmostEqual(stats["winner"]["brier"], (.35**2 + .4**2 + .55**2) / 3, places=4)
+
+
+SPLIT_NOW = datetime(2026, 10, 20, 12, 0, tzinfo=timezone.utc)
+
+
+def _split_games():
+    """Week 6 (2026): one graded game plus one game with no final score."""
+    return pd.DataFrame([
+        {"game_type": "REG", "season": 2026, "week": 6,
+         "gameday": "2026-10-18", "away_team": "AAA",
+         "home_team": "BBB", "home_score": 24.0, "away_score": 17.0},
+        {"game_type": "REG", "season": 2026, "week": 6,
+         "gameday": "2026-10-18", "away_team": "PEN_A",
+         "home_team": "PEN_H", "home_score": float("nan"),
+         "away_score": float("nan")},
+    ])
+
+
+def _split_paths(directory: Path):
+    """One graded game and one pending game, mixed PLAYABLE / NO_VALUE.
+
+    Graded game (HOM 24 - AWY 17):
+      moneyline home @1.8 PLAYABLE  -> win  (+0.80u)
+      spread   home -10.0 @1.91 NO_VALUE -> loss (-1.00u)
+    Pending game (no final score), two dead-line ceiling demotions: one
+    priced ref and one unpriceable (decimal None) ref, so the count proves
+    it happens before the gradeability/scoreboard skips.
+    """
+    graded = _fc("g:MIX", "AAA", "BBB", "2026-10-18T17:00:00+00:00",
+                 0.6, 5.0, 45.0,
+                 [_ref("moneyline", "home", None, 1.8),
+                  _ref("spread", "home", -10.0, 1.91, status="NO_VALUE")])
+    pending = _fc("g:PEND", "PEN_A", "PEN_H", "2026-10-18T20:00:00+00:00",
+                  0.55, 2.0, 46.0,
+                  [_ref("moneyline", "home", None, 1.85, status="NO_VALUE",
+                        note="DEAD_LINE_SUSPECT"),
+                   _ref("spread", "home", -3.0, None, status="NO_VALUE",
+                        note="no reference price captured DEAD_LINE_SUSPECT")])
+    path = directory / "split.json"
+    path.write_text(json.dumps({
+        "model_version": FORECAST_MODEL_VERSION,
+        "generated_at_utc": "2026-10-18T12:00:00+00:00",
+        "forecasts": [graded, pending],
+    }))
+    return [path]
+
+
+class TestWeeklyNoValueSplit(unittest.TestCase):
+    def _stats(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            return grade_week(season=2026, week=6, games=_split_games(),
+                              paths=_split_paths(Path(tmp)), now=SPLIT_NOW)
+
+    def test_no_value_ref_excluded_from_playable_buckets(self):
+        stats = self._stats()
+        # PLAYABLE only: the moneyline win, nothing else.
+        self.assertEqual(stats["priced"]["plays"], 1)
+        self.assertEqual((stats["record"]["wins"], stats["record"]["losses"],
+                          stats["record"]["pushes"]), (1, 0, 0))
+        self.assertEqual(stats["record"]["pct"], 1.0)
+        self.assertAlmostEqual(stats["priced"]["units"], 0.8, places=2)
+        self.assertEqual(stats["families"]["moneyline"]["n"], 1)
+        self.assertEqual(stats["families"]["spread"]["n"], 0)
+        self.assertEqual(stats["families"]["total"]["n"], 0)
+        # The NO_VALUE spread loss lands in its own bundle.
+        nv = stats["no_value"]
+        self.assertEqual(nv["priced"]["plays"], 1)
+        self.assertEqual((nv["record"]["wins"], nv["record"]["losses"],
+                          nv["record"]["pushes"]), (0, 1, 0))
+        self.assertAlmostEqual(nv["priced"]["units"], -1.0, places=2)
+        self.assertEqual(nv["families"]["spread"]["losses"], 1)
+        self.assertEqual(nv["families"]["moneyline"]["n"], 0)
+
+    def test_recap_shows_split_and_ceiling_hits(self):
+        text = render_weekly_recap(self._stats())
+        self.assertIn("Week record: 1-0 (100.0%)", text)
+        self.assertIn("  Moneylines: 1-0", text)
+        self.assertNotIn("  Spreads:", text)  # playable family lines only
+        self.assertIn("NO_VALUE: 0-1 (1 graded refs, excluded from the record)",
+                      text)
+        self.assertIn("Dead-line ceiling hits: 2", text)
+        self.assertIn("Priced ROI: +0.80u across 1 plays (+80.0%)", text)
+        self.assertIn("Pending: 1 games", text)
+
+    def test_ceiling_hits_counted_before_gradeability_skip(self):
+        stats = self._stats()
+        # Both demoted refs sit on the pending (unscored) game: one priced,
+        # one with decimal None. Neither is graded, both are counted.
+        self.assertEqual(stats["ceiling_hits"], 2)
+        self.assertEqual(stats["pending"], ["PEN_A @ PEN_H"])
+        self.assertEqual(stats["no_value"]["priced"]["plays"], 1)
+
+
+class TestWeeklyPooledReconciliation(unittest.TestCase):
+    def test_playable_plus_no_value_equals_old_pooled(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            stats = grade_week(season=2026, week=6, games=_split_games(),
+                               paths=_split_paths(Path(tmp)), now=SPLIT_NOW)
+        playable_n = stats["priced"]["plays"]
+        no_value_n = stats["no_value"]["priced"]["plays"]
+        # Before the split these were one pooled `priced.plays` == 2.
+        self.assertEqual(playable_n + no_value_n, 2)
+        # ... and one pooled unit total == -0.20u.
+        self.assertAlmostEqual(stats["priced"]["units"]
+                               + stats["no_value"]["priced"]["units"],
+                               -0.2, places=2)
+        # Decisions reconcile the same way.
+        self.assertEqual(stats["record"]["wins"] + stats["record"]["losses"]
+                         + stats["no_value"]["record"]["wins"]
+                         + stats["no_value"]["record"]["losses"], 2)
+
+    def test_pooled_buckets_survive_for_artifact_consumers(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            stats = grade_week(season=2026, week=6, games=_split_games(),
+                               paths=_split_paths(Path(tmp)), now=SPLIT_NOW)
+        for key in ("record", "families", "priced"):
+            self.assertIn(key, stats)
+        self.assertIn("no_value", stats)
+        self.assertIsInstance(stats["ceiling_hits"], int)
+        for key in ("record", "families", "priced"):
+            self.assertIn(key, stats["no_value"])
 
 
 class TestWeeklyDelivery(unittest.TestCase):

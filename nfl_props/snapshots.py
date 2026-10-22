@@ -87,6 +87,11 @@ def _ref_pick(ref) -> dict:
         "ev": get("ev"),
         "status": get("status"),
         "source": get("source"),
+        # `note` is not a pricing input; it carries the demotion markers
+        # (e.g. DEAD_LINE_SUSPECT from the EV/edge ceiling) that the
+        # weekly recap counts. Snapshots must preserve it or grading sees
+        # a demoted NO_VALUE pick with no reason attached.
+        "note": get("note"),
     }
 
 
