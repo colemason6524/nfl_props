@@ -4,9 +4,17 @@ Read-only audit of weeks 1–6 (kickoffs through 2026-10-20T00:15Z) asking one
 question: did the 2026-10-18/19 selection fixes stop the totals bleed, and what
 is lagging now. No code was changed for this review.
 
+> **Superseded in scope (2026-10-22).** The season line below is the **pooled**
+> basis — every priced reference, PLAYABLE and NO_VALUE together. That pooled
+> headline was retired as the advertised record on 2026-10-22; the bettable
+> record is PLAYABLE-only (**89-92-1, -10.80u, -5.93%**, 182 refs) and the
+> pooled figure is now printed as a labelled diagnostic. The cuts, cohorts and
+> argument in this document are unaffected. See
+> `docs/INTEGRITY_AUDIT_2026-10-22.md`.
+
 ## Verdict
 
-- Season: **263 graded refs, 138-124-1, -14.86u, -5.7% ROI** (flat 1u at printed odds).
+- Season (pooled over all 263 priced refs): **137-124-2, -14.86u, -5.7% ROI** (flat 1u at printed odds). *Corrected 2026-10-22: this line read 138-124-1 — the NYG@WAS 27-27 tie is a push, not a win; the unit and ROI figures were already right.*
 - The bleed is **totals**, not the board as a whole: totals -11.16u (-12.8%) against spreads **+1.95u (+2.2%)**.
 - Inside totals, the bleed is **PLAYABLE totals**: -12.66u (-17.3%, n=73). Totals the board *rejected* made **+1.50u (+10.7%, n=14)**.
 - Both fixes landed 14 refs ago (n=14 post-fix: 10-4, +3.69u). Direction is right; the sample is far too small to call it fixed.

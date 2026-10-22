@@ -51,7 +51,9 @@ book; its scraper is deferred.
   EV cap to Watch.
 - The live thesis is therefore: model-vs-Bovada disagreement in a capped EV
   window, focused on totals-family markets, graded prospectively. Treat live
-  ROI as research until `grade.py` builds a 50–100 play sample.
+  ROI as research until `grade_forecast.py` builds a 50–100 play sample
+  (the v1/v2 `grade.py` path is retired and its `outputs/history/` artifacts
+  are frozen at 2026-09-12).
 
 ## Design invariants (do not silently change)
 

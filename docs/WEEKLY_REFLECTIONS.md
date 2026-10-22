@@ -1,5 +1,15 @@
 # Weekly Reflections — nfl_props
 
+> **Scope note (2026-10-22).** This is a hand-written weekly journal, and it is
+> a *derived view*, not a record. Every table below pools **all priced
+> references** (PLAYABLE and NO_VALUE alike) as they graded at the time; the
+> season record since 2026-10-22 is **PLAYABLE references only** — see
+> `docs/INTEGRITY_AUDIT_2026-10-22.md`. Where an older week's numbers disagree
+> with today's machine grade, the machine artifact in
+> `outputs/forecast_backtests/` wins: later weeks include dead-line repairs and
+> Monday games that these entries did not. Numbers here are not retroactively
+> rewritten; read them as prose history, not as the score.
+
 ## Template (copy for each week)
 
 ### Week N — [Date Range]

@@ -173,7 +173,8 @@ threshold change; `MODEL_VERSION`/`TIER_POLICY_VERSION` unchanged,
   Over/Under outcomes. This is the fixture we'll use to verify the parser when
   real team totals post in game week.
 - Terminal output caps Watch rows at 30 (all still exported to history);
-  `run_board.py --all-watch` prints everything.
+  `run_board.py --all-watch` prints everything. *(Legacy v1/v2 board — retired
+  operationally 2026-10-22; kept as history, see `docs/ARCHITECTURE.md`.)*
 - Added `tests/` (`unittest`, no new deps): cache safety, kickoff filtering,
   main-market + team-total parsing. `python -m unittest discover -s tests`.
 - Windows smoke testing found the task account already had another project's

@@ -87,5 +87,8 @@ implement when direction is clear. Free data only; never add paid APIs
 without being asked. Update docs when process changes; log findings in
 `docs/PLAN.md`, version bumps per `nfl_props/version.py` rules.
 
-Start by reading `docs/HANDOFF.md`, then run
-`.venv/bin/python run_board.py` and check the coverage diagnostics.
+Start by reading `docs/HANDOFF.md` and `docs/OPERATIONS.md`, then run
+`.venv/bin/python run_forecast_board.py --no-export` (live forecast board;
+add `--discord` only when you mean to post) and
+check the coverage diagnostics. `run_board.py` / `grade.py` are the retired
+v1/v2 path (see `docs/ARCHITECTURE.md`) — do not start there.

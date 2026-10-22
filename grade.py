@@ -1,13 +1,25 @@
 #!/usr/bin/env python3
-"""Grade exported board snapshots against nflverse final scores.
+"""RETIRED — legacy v1/v2 grader for `outputs/history/`. Not the record.
 
-For every (matchup, market, side) it grades only the LATEST snapshot taken
-before kickoff, so line moves across the week don't double-count. Pushes are
-a wash. Ungraded rows (game not final yet in games.csv) are reported, not
-dropped silently — unresolved until the data refreshes is normal.
+The v1/v2 price-screened board stopped writing on 2026-09-12, so the newest
+artifact this module can grade is `outputs/history/nfl_board_20260912T145628Z.json`.
+Any record it prints covers 2026-08-13..2026-09-12 only and is NOT the current
+season record ([[docs/INTEGRITY_AUDIT_2026-10-22.md]]).
 
-Default scope: Core + Lean (the actionable tiers). --include-watch adds the
-research tier.
+The live record is `outputs/forecast_history/nfl_forecast_*.json`, written by
+`nfl_props.forecast_output.export_history` (via `run_forecast_board.py`) and
+graded by `grade_forecast.py`.
+
+`main()` therefore refuses to run and exits 2. The grading helpers below are
+kept intact (and tested) purely so the frozen artifacts stay reproducible; if
+the v1/v2 shadow record is ever wanted again, restore this entry point from
+git history alongside a fresh writer for `outputs/history/`.
+
+Historical behaviour: for every (matchup, market, side) it grades only the
+LATEST snapshot taken before kickoff, so line moves across the week don't
+double-count. Pushes are a wash. Ungraded rows (game not final yet in
+games.csv) are reported, not dropped silently. Default scope was Core + Lean;
+--include-watch added the research tier.
 """
 from __future__ import annotations
 
@@ -201,7 +213,8 @@ def summarize(rows: list[dict], group_key) -> list[str]:
     return out
 
 
-def main() -> int:
+def _legacy_main() -> int:
+    """Original v1/v2 grading run. Kept for reproducibility; not an entry point."""
     ap = argparse.ArgumentParser(description="grade nfl_props history")
     ap.add_argument("--history-dir", type=Path, default=HISTORY_DIR)
     ap.add_argument("--since", default="", help="YYYY-MM-DD snapshot floor")
@@ -298,6 +311,21 @@ def main() -> int:
                 json.dumps(shadow_graded, indent=1, default=str))
         log(f"[grade] report -> {path}")
     return 0
+
+
+def main() -> int:
+    """Refuse: this module grades a frozen, no-longer-written artifact set."""
+    print(
+        "grade.py is RETIRED: it can only grade the frozen v1/v2 artifacts in\n"
+        f"  {HISTORY_DIR} (newest 2026-09-12), so anything it prints is a closed\n"
+        "  out-of-season record, NOT the current season record.\n"
+        "The live record is outputs/forecast_history/, graded by grade_forecast.py:\n"
+        "  .venv/bin/python grade_forecast.py                     # season\n"
+        "  .venv/bin/python grade_forecast.py --weekly --week N    # one week\n"
+        "See docs/INTEGRITY_AUDIT_2026-10-22.md for why this entry point is retired.",
+        file=sys.stderr,
+    )
+    return 2
 
 
 if __name__ == "__main__":
