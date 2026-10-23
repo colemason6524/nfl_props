@@ -3,8 +3,8 @@ Description=nfl_props late-pregame injury refresh (Sun 09:30 ET, NFL)
 
 [Timer]
 OnCalendar=Sun *-*-* 09:30:00 America/Detroit
-Persistent=true
-Unit=nfl-pregame-refresh.service
+Persistent=false
+Unit=sports-nfl-pregame-refresh.service
 
 [Install]
 WantedBy=timers.target

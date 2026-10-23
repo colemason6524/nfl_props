@@ -6,6 +6,7 @@
 |---|---|---|
 | Thu 19:15 | Forecast Thursday game | `sports-nfl-board.timer` |
 | Thu 19:45 | Injury delta check — **silent, diary only** (no Discord) | `sports-nfl-delta-check.timer` |
+| Sun 09:30 | Late pregame injury pull + board regen (Sunday early slate) | `sports-nfl-pregame-refresh.timer` → `sports-nfl-pregame-refresh.service` |
 | Sun 11:00 | Forecast Sunday early slate | `sports-nfl-board.timer` |
 | Sun 14:47 | Wave board: full refresh for the remaining slate | `sports-nfl-wave2.timer` |
 | Sun 15:37 | Forecast remaining Sunday evening slate | `sports-nfl-board.timer` |
@@ -46,11 +47,18 @@ the only Discord surface, so the wrapper deliberately calls
 snapshot is written only when a check would have fired. Log:
 `logs/nfl_delta_check.log`.
 
-Scheduling gap (documented, not silently fixed):
-`sports-nfl-pregame-refresh.timer` (Sun 09:30) is **disabled** and has never
-fired, so the only late pregame refresh in production is the Monday 19:15 one.
-It needs a decision, not a guess — see
-[`INTEGRITY_AUDIT_2026-10-22.md`](INTEGRITY_AUDIT_2026-10-22.md).
+Sunday pregame refresh (enabled 2026-10-23): `sports-nfl-pregame-refresh.timer`
+fires the same `sports-nfl-pregame-refresh.service` at Sun 09:30 ET, alongside
+the Monday 19:15 `sports-nfl-mnf-refresh.timer`. A real run passes `--discord`
+and therefore **does** publish a board. The timer is deliberately
+`Persistent=false`: with `Persistent=true`, enabling a timer whose last elapse
+was missed fires that run immediately and posts a spurious board, which is
+exactly the failure this timer was fixed for. History: it fired once on
+2026-10-11 (Sun 09:30 ET), was stopped on 2026-10-14 and therefore did not run
+on 2026-10-18; the 2026-10-22 audit note that it "has never fired" is
+corrected here — `LastTriggerUSec` reads empty only because disabling the
+timer resets it. See [`INTEGRITY_AUDIT_2026-10-22.md`](INTEGRITY_AUDIT_2026-10-22.md)
+for the original finding.
 
 ## Linux production (Azure VM) — current
 
@@ -61,11 +69,13 @@ Deploy/verify steps: [`DEPLOY_LINUX.md`](DEPLOY_LINUX.md). Summary:
 - User-level `sports-*` fleet timers (production since 2026-09-09), all
   `Persistent=false` except `sports-nfl-mnf-refresh` (true): board (Thu 19:15,
   Sun 11:00, Sun 15:37, Mon 18:00 ET), wave2 (Sun 14:47 Detroit), pregame
-  refresh (Mon 19:15 ET via mnf-refresh), delta check (Thu 19:45, Sun 15:47,
+  refresh (Sun 09:30 ET via `sports-nfl-pregame-refresh.timer`, Mon 19:15 ET
+  via mnf-refresh), delta check (Thu 19:45, Sun 15:47,
   Mon 23:45 ET — silent/diary only), weekly recap (Tue 03:30 ET), grade
-  (Tue 08:47 Detroit). `sports-nfl-pregame-refresh.timer` exists but is
-  disabled. Disabled system-level `nfl-props-*` timers remain in
-  `scripts/systemd/` as a documented fallback.
+  (Tue 08:47 Detroit). Repo copies of the two pregame-refresh units are
+  `scripts/systemd/sports-nfl-pregame-refresh.{timer,service}`, byte-identical
+  to the installed user units. Disabled system-level `nfl-props-*` timers
+  remain in `scripts/systemd/` as a documented fallback.
 - Env/config in `~/.config/nfl_props/env`; logs in
   `logs/nfl_forecast.log` / `logs/nfl_grade.log` plus `journalctl`.
 - Verify: `systemctl list-timers --all | grep sports-nfl`, trigger a timer
