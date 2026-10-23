@@ -5,11 +5,14 @@
 | When (America/New_York) | What | Timer |
 |---|---|---|
 | Thu 19:15 | Forecast Thursday game | `sports-nfl-board.timer` |
+| Thu 19:45 | Injury delta check — **silent, diary only** (no Discord) | `sports-nfl-delta-check.timer` |
 | Sun 11:00 | Forecast Sunday early slate | `sports-nfl-board.timer` |
 | Sun 14:47 | Wave board: full refresh for the remaining slate | `sports-nfl-wave2.timer` |
 | Sun 15:37 | Forecast remaining Sunday evening slate | `sports-nfl-board.timer` |
+| Sun 15:47 | Injury delta check — **silent, diary only** (no Discord) | `sports-nfl-delta-check.timer` |
 | Mon 18:00 | Forecast Monday game | `sports-nfl-board.timer` |
 | Mon 19:15 | Late pregame injury pull + board regen (`Persistent=true`) | `sports-nfl-mnf-refresh.timer` → `sports-nfl-pregame-refresh.service` |
+| Mon 23:45 | Injury delta check — **silent, diary only** (no Discord) | `sports-nfl-delta-check.timer` |
 | Tue 03:30 | Public weekly recap (refresh finals → `grade_forecast.py --weekly --discord`) | `sports-nfl-weekly-grade.timer` |
 | Tue 08:47 | Grade forecasts, refresh data, rebuild v1+v2+forecast state | `sports-nfl-grade.timer` |
 
@@ -34,12 +37,19 @@ figure survives only as a `pooled` diagnostic. Grading prices every reference
 at the latest pre-kickoff snapshot when one exists, falling back to the board
 artifact.
 
-Scheduling gaps (documented, not silently fixed):
+Delta checks (installed 2026-10-23): `sports-nfl-delta-check.timer` runs
+`scripts/run_nfl_linux_task.sh delta_check` at Thu 19:45, Sun 15:47 and Mon
+23:45 ET — ten minutes after each board — against a 30m timeout. It is
+**silent/diary-only by design** (Cole ruling 2026-10-22): the forecast board is
+the only Discord surface, so the wrapper deliberately calls
+`run_delta_check()` without `--discord` and posts no webhook. A `source: delta`
+snapshot is written only when a check would have fired. Log:
+`logs/nfl_delta_check.log`.
+
+Scheduling gap (documented, not silently fixed):
 `sports-nfl-pregame-refresh.timer` (Sun 09:30) is **disabled** and has never
-fired, so the only late pregame refresh in production is the Monday 19:15 one;
-and `scripts/run_nfl_linux_task.sh delta_check` has **no timer at all**, so
-`nfl_props/delta.py` never runs unattended (no snapshot has ever carried
-`source: delta`). Both need a decision, not a guess — see
+fired, so the only late pregame refresh in production is the Monday 19:15 one.
+It needs a decision, not a guess — see
 [`INTEGRITY_AUDIT_2026-10-22.md`](INTEGRITY_AUDIT_2026-10-22.md).
 
 ## Linux production (Azure VM) — current
@@ -51,7 +61,8 @@ Deploy/verify steps: [`DEPLOY_LINUX.md`](DEPLOY_LINUX.md). Summary:
 - User-level `sports-*` fleet timers (production since 2026-09-09), all
   `Persistent=false` except `sports-nfl-mnf-refresh` (true): board (Thu 19:15,
   Sun 11:00, Sun 15:37, Mon 18:00 ET), wave2 (Sun 14:47 Detroit), pregame
-  refresh (Mon 19:15 ET via mnf-refresh), weekly recap (Tue 03:30 ET), grade
+  refresh (Mon 19:15 ET via mnf-refresh), delta check (Thu 19:45, Sun 15:47,
+  Mon 23:45 ET — silent/diary only), weekly recap (Tue 03:30 ET), grade
   (Tue 08:47 Detroit). `sports-nfl-pregame-refresh.timer` exists but is
   disabled. Disabled system-level `nfl-props-*` timers remain in
   `scripts/systemd/` as a documented fallback.

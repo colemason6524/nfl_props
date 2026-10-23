@@ -1,0 +1,10 @@
+[Unit]
+Description=NFL pre-kickoff injury delta check (silent, diary only)
+After=network-online.target
+Wants=network-online.target
+ConditionPathExists=%h/nfl_props/scripts/run_nfl_linux_task.sh
+
+[Service]
+Type=oneshot
+ExecStart=%h/nfl_props/scripts/run_nfl_linux_task.sh delta_check
+TimeoutStartSec=infinity
