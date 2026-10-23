@@ -160,16 +160,16 @@ class TestWeeklyGrading(unittest.TestCase):
                           fams["total"]["pushes"]), (2, 0, 1))
 
     def test_format_matches_public_recap(self):
+        """House format: brand header, Plays row, footer windows, sign-off."""
         text = render_weekly_recap(self._stats())
-        self.assertIn("NFL Board Recap - Week 2 (Sep 10-14)", text)
-        self.assertIn("Week record: 6-1-2 (85.7%)", text)
-        self.assertIn("  Moneylines: 2-1", text)
-        self.assertIn("  Spreads: 2-0-1", text)
-        self.assertIn("  Totals: 2-0-1", text)
-        self.assertIn("NO_VALUE: none graded", text)
-        self.assertIn("Dead-line ceiling hits: 0", text)
-        self.assertIn("Priced ROI: +4.54u across 9 plays (+50.4%)", text)
-        self.assertIn("Pending: 1 games", text)
+        self.assertTrue(text.startswith(
+            "\U0001f4b0 POO DOLLA BETS \u2014 NFL RESULTS"))
+        self.assertIn("Week 2 (Sep 10-14)", text)
+        self.assertIn("\u2b50 Plays: 6-1-2, +4.5u", text)
+        for internal in ("NO_VALUE", "ceiling", "ROI", "Pending",
+                         "Moneylines", "Spreads", "Totals"):
+            self.assertNotIn(internal, text)
+        self.assertTrue(text.endswith("thank you Lawler"))
 
     def test_every_fixture_ref_is_playable_so_no_value_is_empty(self):
         stats = self._stats()
@@ -295,16 +295,15 @@ class TestWeeklyNoValueSplit(unittest.TestCase):
         self.assertEqual(nv["families"]["spread"]["losses"], 1)
         self.assertEqual(nv["families"]["moneyline"]["n"], 0)
 
-    def test_recap_shows_split_and_ceiling_hits(self):
+    def test_recap_shows_playable_record_only(self):
+        """NO_VALUE and ceiling hits are internal: they never reach the card."""
         text = render_weekly_recap(self._stats())
-        self.assertIn("Week record: 1-0 (100.0%)", text)
-        self.assertIn("  Moneylines: 1-0", text)
-        self.assertNotIn("  Spreads:", text)  # playable family lines only
-        self.assertIn("NO_VALUE: 0-1 (1 graded refs, excluded from the record)",
-                      text)
-        self.assertIn("Dead-line ceiling hits: 2", text)
-        self.assertIn("Priced ROI: +0.80u across 1 plays (+80.0%)", text)
-        self.assertIn("Pending: 1 games", text)
+        self.assertTrue(text.startswith(
+            "\U0001f4b0 POO DOLLA BETS \u2014 NFL RESULTS"))
+        self.assertIn("\u2b50 Plays: 1-0, +0.8u", text)
+        for internal in ("NO_VALUE", "ceiling", "ROI", "Pending", "Spreads"):
+            self.assertNotIn(internal, text)
+        self.assertTrue(text.endswith("thank you Lawler"))
 
     def test_ceiling_hits_counted_before_gradeability_skip(self):
         stats = self._stats()

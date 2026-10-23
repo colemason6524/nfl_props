@@ -686,50 +686,35 @@ def grade_week(season: Optional[int] = None, week: Optional[int] = None,
     }
 
 
-def render_weekly_recap(stats: dict) -> str:
-    """Public weekly recap: playable record, NO_VALUE split, priced ROI.
+def render_weekly_recap(stats: dict,
+                        results: Optional[dict] = None) -> str:
+    """Public weekly recap card in the house format.
 
-    The headline `Week record` (and the family lines) cover PLAYABLE
-    references only -- those are the picks the board actually put forward.
-    NO_VALUE references are graded and reported on their own line so the
-    two never pool, and dead-line ceiling demotions are counted separately
-    because they are a data-quality signal, not a result.
+    Header / tier rows / footer / sign-off, nothing else: no internal
+    vocabulary (NO_VALUE, ceiling hits, reason codes) and no ROI internals on
+    the page. Rows and units come from the grade report itself, so the card
+    can never disagree with the ledger. The Leans row prints only when the
+    report carries a leans bundle (sections with no picks are omitted).
     """
+    from nfl_props import house
     rec = stats["record"]
-    pct = " (n/a)" if rec["pct"] is None else f" ({rec['pct']:.1%})"
-    lines = [
-        f"NFL Board Recap - {stats['label']}",
-        "",
-        f"Week record: {_record_text(rec['wins'], rec['losses'], rec['pushes'])}{pct}",
-    ]
-    for fam_key, fam_label in WEEKLY_FAMILIES:
-        g = stats["families"][fam_key]
-        if g["n"]:
-            lines.append(f"  {fam_label}: "
-                         f"{_record_text(g['wins'], g['losses'], g['pushes'])}")
-    lines.append("")
-    no_value = stats.get("no_value") or {}
-    nv_rec = no_value.get("record") or {}
-    nv_plays = (no_value.get("priced") or {}).get("plays", 0)
-    if nv_plays:
-        nv_text = _record_text(nv_rec.get("wins", 0),
-                               nv_rec.get("losses", 0),
-                               nv_rec.get("pushes", 0))
-        lines.append(f"NO_VALUE: {nv_text} ({nv_plays} graded refs, "
-                     "excluded from the record)")
-    else:
-        lines.append("NO_VALUE: none graded")
-    lines.append("Dead-line ceiling hits: "
-                 f"{int(stats.get('ceiling_hits') or 0)}")
-    priced = stats["priced"]
-    if priced["plays"]:
-        lines += ["", f"Priced ROI: {priced['units']:+.2f}u across "
-                      f"{priced['plays']} plays ({priced['roi']:+.1%})"]
-    else:
-        lines += ["", "Priced ROI: n/a (no graded references)"]
-    if stats["pending"]:
-        lines.append(f"Pending: {len(stats['pending'])} games")
-    return "\n".join(lines)
+    priced = stats.get("priced") or {}
+    rows: List[tuple] = []
+    if (rec.get("wins") or rec.get("losses") or rec.get("pushes")):
+        rows.append((house.PLAYS_EMOJI, "Plays",
+                     house.record_text({"wins": rec["wins"],
+                                        "losses": rec["losses"],
+                                        "pushes": rec["pushes"],
+                                        "units": priced.get("units"),
+                                        "plays": priced.get("plays")
+                                        or (rec["wins"] + rec["losses"]
+                                            + rec["pushes"])})))
+    leans = stats.get("leans") or {}
+    if leans.get("plays"):
+        rows.append((house.LEANS_EMOJI, "Leans", house.record_text(leans)))
+    return house.render_card(
+        rows, results, day=str(stats.get("label") or ""),
+        empty_note="No picks graded this week.")
 
 
 def _load_weekly_delivered() -> set:
@@ -747,6 +732,67 @@ def _record_weekly_delivered(key: str) -> None:
     DELIVERY_MARKER.parent.mkdir(parents=True, exist_ok=True)
     DELIVERY_MARKER.write_text(json.dumps({"weeks": sorted(keys)}, indent=1),
                                encoding="utf-8")
+
+
+def rolling_results(now: Optional[datetime] = None,
+                    games: Optional[pd.DataFrame] = None) -> dict:
+    """Rolling records for the house footer: last slate, 7d, 30d.
+
+    Gradeable = PLAYABLE references graded at the captured price (the same
+    rows, price and settle rule the season record uses), so the footer can
+    never disagree with the ledger. Windows are kickoff-based in ET; "last
+    night" is the most recent completed slate, never a fixed 24h box.
+    """
+    from nfl_props.references import PLAYABLE
+    now = now or datetime.now(timezone.utc)
+    rows: List[dict] = []
+    if games is None:
+        from nfl_props.sources.nflverse import load_raw_games
+        games = load_raw_games()
+    if games is not None and not games.empty:
+        chosen = select_latest_pregame(
+            sorted(FORECAST_HISTORY_DIR.glob("nfl_forecast_*.json")))
+        for fc in chosen.values():
+            fc = _with_snapshot_pick(fc)
+            final = match_final(games, fc["away"], fc["home"], fc["_kickoff"])
+            if final is None or pd.isna(final.get("home_score")) \
+                    or pd.isna(final.get("away_score")):
+                continue
+            hp, ap = float(final["home_score"]), float(final["away_score"])
+            for ref in fc.get("references", []):
+                if ref.get("status") != PLAYABLE or ref.get("decimal") is None:
+                    continue
+                result = grade_reference(ref, hp, ap)
+                if result is None:
+                    continue
+                rows.append({"kickoff": fc["_kickoff"], "result": result,
+                             "units": units(result, float(ref["decimal"]))})
+
+    def bundle(batch: List[dict]) -> dict:
+        rec = _wl_rows(batch)
+        total = round(sum(r["units"] for r in batch), 2)
+        return {**rec, "units": total, "plays": len(batch),
+                "roi": round(total / len(batch), 4) if batch else None}
+
+    today = now.astimezone(WEEKLY_TZ).date()
+    dated = [r for r in rows if r.get("kickoff") is not None]
+    past = [r for r in dated
+            if r["kickoff"].astimezone(WEEKLY_TZ).date() < today]
+    last_night: List[dict] = []
+    label = None
+    if past:
+        latest = max(r["kickoff"].astimezone(WEEKLY_TZ).date() for r in past)
+        last_night = [r for r in past
+                      if r["kickoff"].astimezone(WEEKLY_TZ).date() == latest]
+        label = latest.strftime("%a %b %-d")
+    cutoff_7 = now - timedelta(days=7)
+    cutoff_30 = now - timedelta(days=30)
+    return {
+        "last_night": bundle(last_night),
+        "last_night_label": label,
+        "last_7d": bundle([r for r in dated if r["kickoff"] > cutoff_7]),
+        "last_30d": bundle([r for r in dated if r["kickoff"] > cutoff_30]),
+    }
 
 
 def _post_weekly_recap(stats: dict, force: bool) -> int:
@@ -796,7 +842,12 @@ def main() -> int:
         if stats.get("error"):
             print(f"weekly grade: {stats['error']}")
             return 1
-        text = render_weekly_recap(stats)
+        try:
+            results = rolling_results()
+        except Exception as exc:  # footer must never block the card
+            log(f"[grade_forecast] rolling results unavailable: {exc}")
+            results = None
+        text = render_weekly_recap(stats, results=results)
         print(text)
         if not args.no_export:
             stamp = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")

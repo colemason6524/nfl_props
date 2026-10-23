@@ -358,15 +358,17 @@ class TestBoard(unittest.TestCase):
         self.assertEqual(summary["priced"], 0)
         self.assertEqual(forecasts[0].winner_pick, "home")
 
-    def test_render_has_three_sections_and_unpriced(self):
+    def test_render_uses_house_format(self):
+        """Unpriced families stay off the page; only the brand block shows."""
         from nfl_props.forecast_output import render_board
         state = _fake_state()
         forecasts, summary = build_board(state, [_game()])
         text = render_board(forecasts, summary)
-        for section in ("== Moneylines (1) ==", "== Spreads (1) ==",
-                        "== Totals (1) =="):
-            self.assertIn(section, text)
-        self.assertIn("UNPRICED", text)
+        self.assertTrue(text.startswith("\U0001f4b0 POO DOLLA BETS \u2014 NFL"))
+        self.assertIn("No plays today.", text)
+        self.assertTrue(text.endswith("thank you Lawler"))
+        for internal in ("UNPRICED", "Moneylines", "Spreads", "Totals"):
+            self.assertNotIn(internal, text)
 
     def test_discord_chunking_preserves_every_line(self):
         from nfl_props.notifiers.forecast_discord import chunk_messages

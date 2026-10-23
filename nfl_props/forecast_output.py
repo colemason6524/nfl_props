@@ -1,14 +1,25 @@
-"""Terminal rendering + history export for the forecast-first board."""
+"""Terminal rendering + history export for the forecast-first board.
+
+The page is the house format (see nfl_props/house.py): brand header, one
+slate line naming the day and games, then starred PLAYS and eyed LEANS only.
+A reference is eligible only when it is PLAYABLE and priced; NO_VALUE,
+UNPRICED, vetoed and gated rows never reach the page -- the board speaks in
+user actions, never in internal labels. Every printed price is derived from
+the same decimal the grader settles on (`ref.decimal`), so price shown is
+price graded.
+"""
 from __future__ import annotations
 
 import json
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Tuple
 from zoneinfo import ZoneInfo
 
+from . import house
 from .config import FORECAST_HISTORY_DIR
 from .forecast import GameForecast
+from .references import PLAYABLE
 from .version import (FORECAST_HISTORY_SCHEMA_VERSION, FORECAST_MODEL_VERSION,
                       PRODUCT_POLICY_VERSION, VALUE_POLICY_VERSION)
 
@@ -17,6 +28,14 @@ SECTIONS = (
     ("spread", "Spreads"),
     ("total", "Totals"),
 )
+
+# Tier split, locked house copy: PLAYS = best value in the proven range;
+# LEANS = smaller value, or confidence too high to trust at face value.
+# These are display buckets only -- eligibility is `status == PLAYABLE`, so a
+# row can move between the two sections but can never appear without being a
+# playable, priced reference.
+LEAN_EDGE_FLOOR = 0.03          # below this the value is "smaller"
+LEAN_CONFIDENCE_CEILING = 0.75  # this confident is not trusted at face value
 
 
 def ref_for(fc: GameForecast, family: str):
@@ -42,56 +61,83 @@ def _projection(fc: GameForecast, family: str) -> str:
     return f"proj margin {fc.projected_margin:+.1f}"
 
 
+def action_label(fc: GameForecast, family: str, ref) -> Optional[str]:
+    """'<who/what> <market> <line>' half of the house pick line."""
+    if ref.side is None:
+        return None
+    if family != "moneyline" and ref.line is None:
+        return None
+    label = _side_label(fc, family, ref)
+    if family == "moneyline":
+        return f"{label} ML"
+    return label
+
+
+def tier_for(ref) -> Optional[str]:
+    """'plays' / 'leans' / None (None = never printed on the page)."""
+    if ref.status != PLAYABLE or ref.decimal is None or ref.p_model is None:
+        return None
+    if ref.p_model >= LEAN_CONFIDENCE_CEILING:
+        return "leans"
+    edge = ref.edge if ref.edge is not None else 0.0
+    if edge < LEAN_EDGE_FLOOR:
+        return "leans"
+    return "plays"
+
+
+def pick_rows(forecasts: List[GameForecast]
+              ) -> Tuple[List[str], List[str]]:
+    """(plays, leans) rendered pick lines, in slate/family order."""
+    plays: List[str] = []
+    leans: List[str] = []
+    for fc in forecasts:
+        if not fc.available:
+            continue
+        for family, _label in SECTIONS:
+            ref = ref_for(fc, family)
+            if ref is None:
+                continue
+            tier = tier_for(ref)
+            if tier is None:
+                continue
+            action = action_label(fc, family, ref)
+            if action is None:
+                continue
+            line = house.pick_line(action, ref.decimal, ref.p_model)
+            (plays if tier == "plays" else leans).append(line)
+    return plays, leans
+
+
+def _change_lines(changes: Optional[List[dict]]) -> List[str]:
+    moved = [c for c in changes or [] if c.get("kind") == "MATERIAL_CHANGE"]
+    if not moved:
+        return []
+    lines = [f"\u21bb Updated from early board ({len(moved)}):"]
+    for c in moved:
+        reasons = "; ".join(c.get("reasons", []))
+        lines.append(f"  - {c.get('matchup')}: {reasons}")
+    return lines
+
+
 def render_board(forecasts: List[GameForecast], summary: dict,
                  now: Optional[datetime] = None, wave: bool = False,
-                 changes: Optional[List[dict]] = None) -> str:
+                 changes: Optional[List[dict]] = None,
+                 results: Optional[dict] = None) -> str:
     now = now or datetime.now(timezone.utc)
+    extra = None
     if wave:
         et = now.astimezone(ZoneInfo("America/New_York"))
         stamp = et.strftime("%-I:%M%p").lower()
-        lines = [f"\U0001f30a WAVE — Remaining games ({stamp} ET)",
-                 f"{summary.get('games', 0)} games | "
-                 f"{summary.get('available', 0)} rated | "
-                 f"{summary.get('priced', 0)} priced"]
-    else:
-        day = now.strftime("%a %b %d")
-        lines = [f"NFL Forecast Board — {day} (ET)",
-                 f"{summary.get('games', 0)} games | "
-                 f"{summary.get('available', 0)} rated | "
-                 f"{summary.get('priced', 0)} priced"]
-    if summary.get("unavailable_games"):
-        lines.append("UNRATED (no forecast): " +
-                     ", ".join(summary["unavailable_games"]))
-    if wave and changes:
-        moved = [c for c in changes
-                 if c.get("kind") == "MATERIAL_CHANGE"]
-        if moved:
-            lines.append(f"\u21bb Updated from early board ({len(moved)}):")
-            for c in moved:
-                reasons = "; ".join(c.get("reasons", []))
-                lines.append(f"  - {c.get('matchup')}: {reasons}")
-    for family, label in SECTIONS:
-        rows = [fc for fc in forecasts if fc.available and ref_for(fc, family)]
-        lines.append(f"\n== {label} ({len(rows)}) ==")
-        for fc in rows:
-            ref = ref_for(fc, family)
-            if ref.side is None or ref.line is None and family != "moneyline":
-                pick = "no line"
-            else:
-                pick = _side_label(fc, family, ref)
-            price = f"@ {ref.american:+d}" if ref.american is not None else "@ -"
-            p_model = (f"model {ref.p_model:.0%}" if ref.p_model is not None
-                       else "model -")
-            p_market = (f"mkt {ref.p_market:.0%} [{ref.n_sources}]"
-                        if ref.p_market is not None else "mkt -")
-            edge = (f"edge {ref.edge:+.1%}" if ref.edge is not None
-                    else "edge -")
-            ev = f"EV {ref.ev:+.1%}" if ref.ev is not None else "EV -"
-            lines.append(
-                f"- {fc.away} @ {fc.home} | {pick} {price} | {p_model} vs "
-                f"{p_market} | {edge} | {ev} | {ref.status} | "
-                f"{_projection(fc, family)}")
-    return "\n".join(lines)
+        extra = f"\U0001f30a WAVE \u2014 Remaining games ({stamp} ET)"
+    pairs = [(fc.away, fc.home) for fc in forecasts]
+    note = (house.slate_note(pairs, extra=extra) if pairs
+            else (extra or "no scheduled games"))
+    plays, leans = pick_rows(forecasts)
+    return house.render_page(
+        plays, leans, results,
+        slate=house.slate_line(now.astimezone(ZoneInfo("America/New_York")),
+                               note),
+        notes=_change_lines(changes) if wave else None)
 
 
 def export_history(forecasts: List[GameForecast], summary: dict,

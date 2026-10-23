@@ -228,7 +228,8 @@ class WaveFilterTest(unittest.TestCase):
 
         text = render_board([], {"games": 0, "available": 0, "priced": 0},
                              now=T1)
-        self.assertIn("NFL Forecast Board", text)
+        self.assertTrue(text.startswith("\U0001f4b0 POO DOLLA BETS \u2014 NFL"))
+        self.assertIn("No plays today.", text)
         self.assertNotIn("WAVE", text)
 
 

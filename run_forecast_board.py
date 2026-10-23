@@ -204,8 +204,15 @@ def main() -> int:
     prev = latest_history()
     changes = detect_changes(forecasts, prev)
 
+    results = None
+    try:  # footer record comes from the grader; never block the board on it
+        from grade_forecast import rolling_results
+        results = rolling_results(now=now)
+    except Exception as exc:  # noqa: BLE001 - footer is best-effort
+        log(f"[forecast] rolling results unavailable ({exc})")
+
     print(render_board(forecasts, summary, now=now, wave=args.wave,
-                       changes=changes))
+                       changes=changes, results=results))
 
     try:
         n_snap = write_board_snapshots(
