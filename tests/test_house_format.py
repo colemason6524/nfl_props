@@ -60,7 +60,7 @@ Wed Oct 21 \u00b7 2 games: KC @ BUF, DAL @ PHI
 BUF -4.5 (-110) \u00b7 57%
 
 \U0001f440 LEANS
-Over 47.5 (-110) \u00b7 78%
+DAL@PHI Over 47.5 (-110) \u00b7 78%
 
 \U0001f4ca Last night: n/a \u00b7 Last 7d: n/a
 thank you Lawler"""
@@ -74,7 +74,21 @@ class ForecastBoardFormatTest(unittest.TestCase):
     def test_pick_grammar(self):
         text = render_forecast_board(_board(), {}, now=NOW)
         self.assertIn("BUF -4.5 (-110) \u00b7 57%", text)
-        self.assertIn("Over 47.5 (-110) \u00b7 78%", text)
+        self.assertIn("DAL@PHI Over 47.5 (-110) \u00b7 78%", text)
+
+    def test_totals_lines_carry_matchup(self):
+        """Regression (house-format defect): totals lines name their game."""
+        from nfl_props.forecast_output import action_label
+        cin_bal = _fc("g:3", "CIN", "BAL", [
+            _ref("total", "under", 46.0, 1.9091, PLAYABLE, 0.54, 0.05),
+        ])
+        self.assertEqual(
+            action_label(cin_bal, "total", cin_bal.references[0]),
+            "CIN@BAL Under 46")
+        text = render_forecast_board(_board(), {"games": 2}, now=NOW)
+        self.assertIn("DAL@PHI Over 47.5 (-110) \u00b7 78%", text)
+        text = render_forecast_board([cin_bal], {"games": 1}, now=NOW)
+        self.assertIn("CIN@BAL Under 46 (-110) \u00b7 54%", text)
 
     def test_only_plays_and_leans_print(self):
         text = render_forecast_board(_board(), {}, now=NOW)

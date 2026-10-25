@@ -52,7 +52,7 @@ def _side_label(fc: GameForecast, family: str, ref) -> str:
         team = fc.home if ref.side == "home" else fc.away
         return f"{team} {ref.line:+g}"
     direction = "Over" if ref.side == "over" else "Under"
-    return f"{direction} {ref.line:g}"
+    return f"{fc.away}@{fc.home} {direction} {ref.line:g}"
 
 
 def _projection(fc: GameForecast, family: str) -> str:
