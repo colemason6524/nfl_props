@@ -56,6 +56,13 @@ case "$TASK" in
         COMMAND=("$PYTHON_EXE" scripts/pregame_refresh.py --discord)
         REQUIRED_SECRET=NFL_DISCORD_WEBHOOK_URL
         ;;
+    pregame-refresh-silent)
+        LOG_FILE="$LOG_DIR/nfl_pregame_refresh_silent.log"
+        TIMEOUT=45m
+        # Late-pregame injury pull + board regen in ONE process (Sun 09:30 ET, silent).
+        COMMAND=("$PYTHON_EXE" scripts/pregame_refresh.py)
+        REQUIRED_SECRET=NFL_DISCORD_WEBHOOK_URL
+        ;;
     weekly-grade)
         LOG_FILE="$LOG_DIR/nfl_weekly_grade.log"
         TIMEOUT=30m
